@@ -128,9 +128,14 @@ void printMove(int source, int dest, BOARDPTR_T(board)) {
     if (target != EMPTY_SQUARE) printf("x");
     printSquareName(dest);
     {
-        // Test for check
-        int tryBoard[8][8];
+        // Test for pawn promotion
+        int tryBoard[8][8], afterPiece;
         tryMove(&tryBoard, dest, board, unpackRow(source), unpackCol(source));
+        afterPiece = getSquare(&tryBoard, unpackRow(dest), unpackCol(dest));
+        if (PIECE(attacker) == PIECE_PAWN && PIECE(afterPiece) != PIECE_PAWN) {
+            printf("%lc", pieceSymbols[PIECE(afterPiece)]);
+        }
+        // Test for check
         BOOL attackerBlack = IS_BLACK(attacker);
         if (inCheck(!attackerBlack, &tryBoard)) {
             //  Check!
@@ -324,8 +329,14 @@ void tryMove(BOARDPTR_T(newBoard), int dest, BARGS) {
     // Apply move on try board. Note that this will also remove
     // captured pieces from the board, but does not track them.
     int piece = getSquare(BPARAMS);
+    BOOL black = IS_BLACK(piece);
+    int destCol = unpackCol(dest);
+    int destRow = unpackRow(dest);
+    // Trivial pawn promotion - always to a queen
+    if (piece == WHITE_PAWN && destRow == 0) piece = WHITE_QUEEN;
+    if (piece == BLACK_PAWN && destRow == 7) piece = BLACK_QUEEN;
     (*newBoard)[row][col] = EMPTY_SQUARE;
-    (*newBoard)[unpackRow(dest)][unpackCol(dest)] = piece;
+    (*newBoard)[destRow][destCol] = piece;
 }
 
 void commitMove(BOARDPTR_T(board), BOARDPTR_T(tryBoard))
@@ -409,7 +420,7 @@ int main() {
         if (from != -1) {
             // Make the best move
             printf("\n%3d. ", move);
-            if (black) printf("         ");
+            if (black) printf("          ");
             printMove(from, to, &chessBoard); printf("\n");
             tryMove(&chessBoard, to, &chessBoard, unpackRow(from), unpackCol(from));
             printBoard(&chessBoard);
