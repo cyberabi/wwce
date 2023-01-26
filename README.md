@@ -24,6 +24,7 @@ Here's what's very basic:
 Known bugs:
 1) Inverted numbering of board ranks
 2) Black square display algorithm doesn't properly alternate ranks
+3) Random number generator is not seeded; all runs are the same
 
 I gave myself this challenge after answering two chess-related questions on Quora. The first was whether an employer should be impressed that a candidate wrote a chess engine. The second was what's the next-worst chess engine after a "random mover."
 
