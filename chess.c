@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
+#include <time.h>
 
 #define BOOL int
 #define FALSE 0
@@ -115,15 +116,16 @@ int unpackRow(int square) { return square / 8; }
 int unpackCol(int square) { return square % 8; }
 // Name of a square
 void printSquareName(int square) {
-    int letter = (7 - unpackCol(square)) + 'A';
-    printf("%c%d", letter, unpackRow(square)+1);
+    int letter = (7 - unpackCol(square)) + 'a';
+    printf("%c%d", letter, (7-unpackRow(square))+1);
 }
 // Move description
 void printMove(int source, int dest, BOARDPTR_T(board)) {
     int attacker = getSquare(board, unpackRow(source), unpackCol(source));
     int target = getSquare(board, unpackRow(dest), unpackCol(dest));
+    printf("%lc", pieceSymbols[PIECE(attacker)]);
     printSquareName(source);
-    printf("%c", (target == EMPTY_SQUARE) ? '-' : 'x');
+    if (target != EMPTY_SQUARE) printf("x");
     printSquareName(dest);
     {
         // Test for check
@@ -132,7 +134,7 @@ void printMove(int source, int dest, BOARDPTR_T(board)) {
         BOOL attackerBlack = IS_BLACK(attacker);
         if (inCheck(!attackerBlack, &tryBoard)) {
             //  Check!
-            printf(" ch");
+            printf("+");
         }
     }
 }
@@ -378,9 +380,10 @@ void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board)) {
 
 void printBoard(BOARDPTR_T(board)) {
     int row, col, piece, pieceType, pieceColor, squareBlack = FALSE;
-    printf("   H  G  F  E  D  C  B  A ");
+    printf("   h  g  f  e  d  c  b  a ");
+    printf("\n   -  -  -  -  -  -  -  - ");
     for (row = 0; row <= 7; row++) {
-        printf("\n%d ", row + 1);
+        printf("\n%d|", (7 - row) + 1);
         for (col = 0; col <= 7; col++) {
             piece = getSquare(BPARAMS);
             if (piece == EMPTY_SQUARE)
@@ -388,6 +391,7 @@ void printBoard(BOARDPTR_T(board)) {
             printf(" %lc ", pieceSymbols[piece]);
             squareBlack = !squareBlack;
         }
+        squareBlack = !squareBlack;
     }
     printf("\n");
 }
@@ -395,20 +399,23 @@ void printBoard(BOARDPTR_T(board)) {
 int main() {
     int from = 0, to = 0;
     // Set up the initial board
+    srand(time(0));
     memcpy(&chessBoard, &initial_board, sizeof(chessBoard));
     printBoard(&chessBoard);
     // Play until no moves.
-    int black = FALSE;
+    int black = FALSE, move = 1;
     while (from != -1) {
         findBestMove(black, &from, &to, &chessBoard);
         if (from != -1) {
             // Make the best move
-            if (black) printf("      ");
+            printf("\n%3d. ", move);
+            if (black) printf("         ");
             printMove(from, to, &chessBoard); printf("\n");
             tryMove(&chessBoard, to, &chessBoard, unpackRow(from), unpackCol(from));
             printBoard(&chessBoard);
             // Switch sides
             black = !black;
+            if (!black) ++move;
         }
     }
     printf("Game over.\n");
