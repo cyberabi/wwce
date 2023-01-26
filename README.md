@@ -18,6 +18,11 @@ Here's what's very basic:
 5) Trivial position evaluation (avoid check and min-max the point value of pieces remaining on the board)
 6) Selects randomly among moves with equal position evaluations
 7) No clock
+8) Non-standard move notation
+9) ASCII board render (upper case is White, lower case is Black, a "." indicates an empty black square.)
+
+Known bugs:
+1) Inverted numbering of board ranks
 
 I gave myself this challenge after answering two chess-related questions on Quora. The first was whether an employer should be impressed that a candidate wrote a chess engine. The second was what's the next-worst chess engine after a "random mover."
 
