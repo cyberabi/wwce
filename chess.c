@@ -14,16 +14,15 @@
 // Additional flags on pieces to indicate that they're
 // vulnerable to en passant, ineligible to castle, or
 // promoting to a different piece. TODO: Implement
-#define CAN_EN_PASSANT  100
-#define CANNOT_CASTLE   1000
-#define PROMOTING       10000
-#define FLAGS_START     100
+#define CAN_EN_PASSANT  (1<<8)
+#define CANNOT_CASTLE   (1<<9)
+#define FLAGS_START     (1<<8)
 #define NO_FLAGS(x)     ((x) % FLAGS_START)
 
 // Color Bias
 #define COLOR_WHITE     0
-#define COLOR_BLACK     10
-#define IS_BLACK(x)     (NO_FLAGS(x)/COLOR_BLACK == 1)
+#define COLOR_BLACK     (1<<3)
+#define IS_BLACK(x)     ((NO_FLAGS(x) / COLOR_BLACK) == 1)
 
 // Pieces
 #define PIECE_PAWN      1
@@ -62,6 +61,7 @@ static const int pieceValues[] = {
 #define BLACK_KING      (COLOR_BLACK + PIECE_KING)
 
 // Boards
+#define EVAL_IN_CHECK   10000
 #define BOARDPTR_T(p)   int (*p)[8][8]
 #define BARGS           BOARDPTR_T(board), int row, int col
 #define BPARAMS         board, row, col
@@ -86,9 +86,10 @@ typedef struct {
     int value;
 }   MOVEINFO;
 
-static wchar_t* pieceSymbols = L" PNBRQK   .pnbrqk";
+static wchar_t* pieceSymbols = L" PNBRQK .pnbrqk ";
 int inCheck(int black, BOARDPTR_T(board));
 void tryMove(BOARDPTR_T(newBoard), int dest, BARGS);
+static int ruleOf75 = 0;
 
 //
 // Basic square operations
@@ -98,6 +99,8 @@ void tryMove(BOARDPTR_T(newBoard), int dest, BARGS);
 BOOL isSquare(BARGS) { return (row >= 0 && row <= 7 && col >= 0 && col <= 7); }
 // What's on the square (without flags, for now)
 BOOL getSquare(BARGS) { return NO_FLAGS((*board)[row][col]); }
+// What's on the square (with flags)
+BOOL getSquareWithFlags(BARGS) { return (*board)[row][col]; }
 // Is the square empty?
 BOOL isEmpty(BARGS) { return (getSquare(BPARAMS) == EMPTY_SQUARE); }
 // Is the square occupied by an enemy?
@@ -159,7 +162,7 @@ int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
     switch (PIECE(myPiece)) {
         // TODO: Test for moves that are illegal due to check
         case    PIECE_PAWN:
-            // TODO: Implement rules for promotion and en passant
+            // TODO: Implement rules for en passant
             checkRow = row + blackSign;
             if (isSquare(board, checkRow, col) && isEmpty(board, checkRow, col)) {
                 // Forward move
@@ -270,7 +273,7 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL black, BOARDPTR_T(board)) {
             for (move = 0; move < numMoves; move++) {
                 moveInfo[numInfos + move].source = pack(row, col);
                 moveInfo[numInfos + move].dest = moves[move];
-                moveInfo[numInfos + move].value = -10000;
+                moveInfo[numInfos + move].value = -EVAL_IN_CHECK;
             }
             numInfos += numMoves;
         }
@@ -356,7 +359,7 @@ void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board)) {
     MOVEINFO moveInfo[1024];
     // Get all the moves
     numInfos = getAllMoves(moveInfo, black, board);
-    // Evaluate each move (moves that leave us in check remain -10000)
+    // Evaluate each move (moves that leave us in check remain -EVAL_IN_CHECK)
     for (move=0; move < numInfos; move++)
     {
         int row = unpackRow(moveInfo[move].source);
@@ -419,11 +422,27 @@ int main() {
         findBestMove(black, &from, &to, &chessBoard);
         if (from != -1) {
             // Make the best move
+            int attacker = getSquare(&chessBoard, unpackRow(from), unpackCol(from));
+            int target = getSquare(&chessBoard, unpackRow(to), unpackCol(to));
             printf("\n%3d. ", move);
             if (black) printf("          ");
             printMove(from, to, &chessBoard); printf("\n");
             tryMove(&chessBoard, to, &chessBoard, unpackRow(from), unpackCol(from));
             printBoard(&chessBoard);
+            // Draw detection
+            if (target != EMPTY_SQUARE || PIECE(attacker) == PIECE_PAWN) {
+                // Reset 75 move draw
+                ruleOf75 = 0;
+            } else {
+                ++ruleOf75;
+                if (ruleOf75 == 150) {
+                    // If checkmate, game over as checkmate
+                    // Otherwise, game over as draw. For now,
+                    // no need to distinguish.
+                    printf("Invoking 75 move rule.\n");
+                    break;
+                }
+            }
             // Switch sides
             black = !black;
             if (!black) ++move;
