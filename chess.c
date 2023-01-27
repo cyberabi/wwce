@@ -387,7 +387,7 @@ void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board)) {
         *from = moveInfo[move].source;
         *to = moveInfo[move].dest;
     } else {
-        printf("No valid moves.\n");
+        //printf("No valid moves.\n");
         *from = *to = -1;
     }
 }
@@ -447,6 +447,9 @@ int main() {
             black = !black;
             if (!black) ++move;
         }
+    }
+    if (from == -1) {
+        printf(inCheck(black, &chessBoard) ? "Checkmate.\n" : "Stalemate.\n");
     }
     printf("Game over.\n");
     return 0;
