@@ -1,28 +1,20 @@
 # wwce
 World's Worst Chess Engine
 
-I challenged myself to write a rudimenatary chess engine in four hours. That initial challenge was a qualified success.
+I challenged myself to write a rudimenatary chess engine in four hours. That initial challenge was a qualified success, and you can find it on the main branch. Here on the bugfix branch I'm making small improvements and bug fixes based on that initial four hour work. Total time invested will still be about 8 hours.
 
-Here's what's missing to make it really Chess:
-1) Pawn promotion
-2) En passant
-3) Castling
-4) Draw detection
-5) Checkmate detection
+Currently not implemented:
+1) En passant
+2) Castling
+3) Pawn promotion to anything other than a queen
+4) Human player input (plays only with itself)
 
-Here's what's very basic:
-1) No player input (plays only with itself)
-2) No understanding of openings
-3) No understanding of end game
-4) No look-ahead
-5) Trivial position evaluation (avoid check and min-max the point value of pieces remaining on the board)
-6) Selects randomly among moves with equal position evaluations
-7) No clock
+Changes that would make it a better engine:
+1) Understanding of openings
+2) Understanding of end game
+3) Look-ahead
+4) Better position evaluation (currently avoids check and min-maxes the point value of pieces remaining on the board)
 
-I gave myself this challenge after answering two chess-related questions on Quora. The first was whether an employer should be impressed that a candidate wrote a chess engine. The second was what's the next-worst chess engine after a "random mover."
-
-The bugfixes branch has incremental improvements to wwce to address the issues called out above.
-The main branch has the original 4 hour project.
 Don't code like this. MIT License. Have fun!
 
 Chris Burke
