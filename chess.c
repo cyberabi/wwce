@@ -11,6 +11,8 @@
 // Constants
 //
 
+#define LOOKAHEAD 1
+
 // Additional flags on pieces to indicate that they're
 // vulnerable to en passant, ineligible to castle, or
 // promoting to a different piece. TODO: Implement
@@ -325,10 +327,16 @@ int evaluatePosition(int black, BOARDPTR_T(board)) {
     return value;
 }
 
+void copyBoard(BOARDPTR_T(board), BOARDPTR_T(tryBoard))
+{
+    // Copy try board to active board
+    memcpy(board, tryBoard, sizeof(*tryBoard));
+}
+
 void tryMove(BOARDPTR_T(newBoard), int dest, BARGS) {
     // Tries moving the piece at row, col to dest
     // Copy active board to try board
-    memcpy(newBoard, board, sizeof(*newBoard));
+    copyBoard(newBoard, board);
     // Apply move on try board. Note that this will also remove
     // captured pieces from the board, but does not track them.
     int piece = getSquare(BPARAMS);
@@ -342,19 +350,16 @@ void tryMove(BOARDPTR_T(newBoard), int dest, BARGS) {
     (*newBoard)[destRow][destCol] = piece;
 }
 
-void commitMove(BOARDPTR_T(board), BOARDPTR_T(tryBoard))
-{
-    // Copy try board to active board
-    memcpy(board, tryBoard, sizeof(*tryBoard));
-}
-
 int evalSort(const void* p1, const void* p2) {
     const MOVEINFO* m1 = (MOVEINFO*)p1;
     const MOVEINFO* m2 = (MOVEINFO*)p2;
     return (m2->value - m1->value);
 }
 
-void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board)) {
+void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board), int lookAhead) {
+    // Returns coordinates of piece in *from, and its destination in *to.
+    // To look ahead, creates a temporary board and finds the best move
+    // of the opposing side, for each possible move.
     int numInfos, tryBoard[8][8], move = 0, validMoves = 0;
     MOVEINFO moveInfo[1024];
     // Get all the moves
@@ -362,9 +367,23 @@ void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board)) {
     // Evaluate each move (moves that leave us in check remain -EVAL_IN_CHECK)
     for (move=0; move < numInfos; move++)
     {
-        int row = unpackRow(moveInfo[move].source);
-        int col = unpackCol(moveInfo[move].source);
-        tryMove(&tryBoard, moveInfo[move].dest, BPARAMS);
+        BOOL laBlack = black;
+        int laTurn;
+        int source = moveInfo[move].source;
+        int dest = moveInfo[move].dest;
+        copyBoard(&tryBoard, board);
+        for (laTurn = lookAhead; laTurn >= 0; laTurn--) {
+            int row = unpackRow(source);
+            int col = unpackCol(source);
+            tryMove(&tryBoard, dest, &tryBoard, row, col);
+            if (inCheck(laBlack, &tryBoard)) break;
+            // Simple look-ahead
+            if (laTurn > 0) {
+                laBlack = !laBlack;
+                findBestMove(laBlack, &source, &dest, &tryBoard, laTurn-1);
+                if (source == -1) break;
+            }
+        }
         if (inCheck(black, &tryBoard)) continue;
         moveInfo[move].value = evaluatePosition(black, &tryBoard);
         ++validMoves;
@@ -419,7 +438,7 @@ int main() {
     // Play until no moves.
     int black = FALSE, move = 1;
     while (from != -1) {
-        findBestMove(black, &from, &to, &chessBoard);
+        findBestMove(black, &from, &to, &chessBoard, LOOKAHEAD);
         if (from != -1) {
             // Make the best move
             int attacker = getSquare(&chessBoard, unpackRow(from), unpackCol(from));
