@@ -14,6 +14,9 @@ Changes that would make it a better engine:
 2) Understanding of end game
 3) Better position evaluation (currently avoids check and min-maxes the point value of pieces remaining on the board)
 
+Known bugs:
+1) Stalemate detection is broken; it declares stalemate when the king could not move wothout placing itself in check.
+
 Don't code like this. MIT License. Have fun!
 
 Chris Burke
