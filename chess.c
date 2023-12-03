@@ -7,11 +7,25 @@
 #define FALSE 0
 #define TRUE (!FALSE)
 
+// How the board will look in terminal window
+// If you're not using a chess compatible font, comment out USE_CHESS_FONT
+// If your terminal window doesn't do VT100 codes, comment out USE_ESCAPE
+// Uncomment DONT_SCROLL if you want the board always drawn at top of window
+// Set COLUMN_SPACER to be "" or " " based on whatever looks good for you.
+//#define USE_CHESS_FONT
+//#define USE_ESCAPE_CODES
+//#define DONT_SCROLL
+#define COLUMN_SPACER " "
+
+// Debugging
+//#define DEBUG_MATES
+
 //
 // Constants
 //
 
-#define LOOKAHEAD 1
+// How many (half) moves to look ahead. At 4 things get quite slow.
+#define LOOKAHEAD 3
 
 // Additional flags on pieces to indicate that they're
 // vulnerable to en passant, ineligible to castle, or
@@ -63,11 +77,13 @@ static const int pieceValues[] = {
 #define BLACK_KING      (COLOR_BLACK + PIECE_KING)
 
 // Boards
+#define MAX_POSSIBLE_MOVES 1024
 #define EVAL_IN_CHECK   10000
 #define BOARDPTR_T(p)   int (*p)[8][8]
 #define BARGS           BOARDPTR_T(board), int row, int col
 #define BPARAMS         board, row, col
 
+#define SQUARE_NONE    -1
 #define EMPTY_SQUARE    0
 static const int initial_board[8][8] =
 {
@@ -88,7 +104,16 @@ typedef struct {
     int value;
 }   MOVEINFO;
 
-static wchar_t* pieceSymbols = L" PNBRQK .pnbrqk ";
+static char* pieceLabels[]  = { " ", "P", "N", "B", "R", "Q", "K", " ",
+                                ".", "p", "n", "b", "r", "q", "k", " " };
+
+#ifdef USE_CHESS_FONT
+static char* pieceSymbols[] = { " ", "♙", "♘", "♗", "♖", "♕", "♔", " ",
+                                "☰", "♟", "♞", "♝", "♜", "♛", "♚", " " };
+#else
+static char** pieceSymbols = &pieceLabels[0];
+#endif
+
 int inCheck(int black, BOARDPTR_T(board));
 void tryMove(BOARDPTR_T(newBoard), int dest, BARGS);
 static int ruleOf75 = 0;
@@ -124,11 +149,25 @@ void printSquareName(int square) {
     int letter = (7 - unpackCol(square)) + 'a';
     printf("%c%d", letter, (7-unpackRow(square))+1);
 }
+
+// Screen clear
+void eraseBoard() {
+#ifdef DONT_SCROLL
+#ifdef USE_ESCAPE_CODES
+    // VT100
+    printf("\e[1;1H\e[2J");
+#else
+    // Linux, OSX, etc.
+    system("clear");
+#endif
+#endif
+}
+
 // Move description
 void printMove(int source, int dest, BOARDPTR_T(board)) {
     int attacker = getSquare(board, unpackRow(source), unpackCol(source));
     int target = getSquare(board, unpackRow(dest), unpackCol(dest));
-    printf("%lc", pieceSymbols[PIECE(attacker)]);
+    printf("%s", pieceLabels[PIECE(attacker)]);
     printSquareName(source);
     if (target != EMPTY_SQUARE) printf("x");
     printSquareName(dest);
@@ -138,7 +177,7 @@ void printMove(int source, int dest, BOARDPTR_T(board)) {
         tryMove(&tryBoard, dest, board, unpackRow(source), unpackCol(source));
         afterPiece = getSquare(&tryBoard, unpackRow(dest), unpackCol(dest));
         if (PIECE(attacker) == PIECE_PAWN && PIECE(afterPiece) != PIECE_PAWN) {
-            printf("%lc", pieceSymbols[PIECE(afterPiece)]);
+            printf("%s", pieceLabels[PIECE(afterPiece)]);
         }
         // Test for check
         BOOL attackerBlack = IS_BLACK(attacker);
@@ -285,7 +324,7 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL black, BOARDPTR_T(board)) {
 
 BOOL inCheck(int black, BOARDPTR_T(board)) {
     // Is the specified color in check?
-    int kingSquare = -1, row, col, piece, move, ourKing;
+    int kingSquare = SQUARE_NONE, row, col, piece, move, ourKing;
     // Find our king
     ourKing = black ? BLACK_KING : WHITE_KING;
     for (row = 0; row <= 7; row++) {
@@ -296,15 +335,17 @@ BOOL inCheck(int black, BOARDPTR_T(board)) {
                 break;
             }
         }
-        if (kingSquare != -1) break;
+        if (kingSquare != SQUARE_NONE) break;
     }
     // Find all valid enemy moves
-    MOVEINFO moveInfo[1024];
+    MOVEINFO moveInfo[MAX_POSSIBLE_MOVES];
     int numInfos = getAllMoves(moveInfo, !black, board);
     // See if any enemy move targets the king's square
     for (move = 0; move < numInfos; move++) {
         if (moveInfo[move].dest == kingSquare) {
-            //printf("Found check from ");printSquareName(moveInfo[move].source);printf("\n");
+#ifdef DEBUG_MATES
+            printf("\nFound check from ");printSquareName(moveInfo[move].source);printf("\n");
+#endif
             return TRUE;
         }
     }
@@ -361,67 +402,100 @@ void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board), int lookAhe
     // To look ahead, creates a temporary board and finds the best move
     // of the opposing side, for each possible move.
     int numInfos, tryBoard[8][8], move = 0, validMoves = 0;
-    MOVEINFO moveInfo[1024];
+    MOVEINFO moveInfo[MAX_POSSIBLE_MOVES];
     // Get all the moves
     numInfos = getAllMoves(moveInfo, black, board);
     // Evaluate each move (moves that leave us in check remain -EVAL_IN_CHECK)
-    for (move=0; move < numInfos; move++)
+    for (move = 0; move < numInfos; move++)
     {
         BOOL laBlack = black;
         int laTurn;
         int source = moveInfo[move].source;
         int dest = moveInfo[move].dest;
+#ifdef DEBUG_MATES
+        printf("Trying "); printMove(source, dest, board); printf("\n");
+#endif
         copyBoard(&tryBoard, board);
         for (laTurn = lookAhead; laTurn >= 0; laTurn--) {
             int row = unpackRow(source);
             int col = unpackCol(source);
             tryMove(&tryBoard, dest, &tryBoard, row, col);
             if (inCheck(laBlack, &tryBoard)) break;
-            // Simple look-ahead
+            // This move is OK
             if (laTurn > 0) {
+                // Simple look-ahead - recurse as other side and make best move
+#ifdef DEBUG_MATES
+                printf("Looking ahead [%d]\n", lookAhead - laTurn + 1);
+#endif
                 laBlack = !laBlack;
                 findBestMove(laBlack, &source, &dest, &tryBoard, laTurn-1);
-                if (source == -1) break;
+                if (source == SQUARE_NONE) break;    // No possible move
             }
         }
-        if (inCheck(black, &tryBoard)) continue;
+        // tryBoard will have the future state of the board after all lookahead
+        // If opponent is in check, that's good. If we're in check, then the
+        // contemplated move is still valid unless it happened before lookahead
+        if (laTurn == lookAhead && inCheck(black, &tryBoard)) continue;
         moveInfo[move].value = evaluatePosition(black, &tryBoard);
         ++validMoves;
     }
     if (validMoves > 0) {
         // Sort the moves for highest result evaluation
         qsort(moveInfo, numInfos, sizeof(MOVEINFO), evalSort);
-        //for (move = 0; move < numInfos; move++) {
-        //    printf("Trying ");
-        //    printMove(moveInfo[move].source, moveInfo[move].dest, board);
-        //    printf(" Value: %d\n", moveInfo[move].value);
-        //}
+#ifdef DEBUG_MATES
+        for (move = 0; move < numInfos; move++) {
+            printf("Trying ");
+            printMove(moveInfo[move].source, moveInfo[move].dest, board);
+            printf(" Value: %d\n", moveInfo[move].value);
+        }
+#endif
         // Find the range of moves with the highest result
         int topValue = moveInfo[0].value;
         int topCount = 0;
         while ((topCount < numInfos) && (moveInfo[topCount].value == topValue)) ++topCount;
         // Select randomly from the highest results
         move = rand() % topCount;
-        //printf("Chose #%d of %d best moves.\n", move, topCount);
+#ifdef DEBUG_MATES
+    printf("Chose #%d of %d best moves.\n", move, topCount);
+#endif
         *from = moveInfo[move].source;
         *to = moveInfo[move].dest;
     } else {
-        //printf("No valid moves.\n");
-        *from = *to = -1;
+#ifdef DEBUG_MATES
+        printf("No valid moves.\n");
+#endif
+        *from = *to = SQUARE_NONE;
     }
+}
+
+void printSpacedChar(char c) {
+    printf("%s%c%s", COLUMN_SPACER, c, COLUMN_SPACER);
+}
+
+void printSpaced(char* text) {
+    char c;
+    while ('\0' != (c = *text++)) printSpacedChar(c);
 }
 
 void printBoard(BOARDPTR_T(board)) {
     int row, col, piece, pieceType, pieceColor, squareBlack = FALSE;
-    printf("   h  g  f  e  d  c  b  a ");
-    printf("\n   -  -  -  -  -  -  -  - ");
+    printf("  "); printSpaced("hgfedcba");
+    printf("\n  "); printSpaced("--------");
     for (row = 0; row <= 7; row++) {
         printf("\n%d|", (7 - row) + 1);
         for (col = 0; col <= 7; col++) {
             piece = getSquare(BPARAMS);
             if (piece == EMPTY_SQUARE)
                 piece += squareBlack ? COLOR_BLACK : COLOR_WHITE;
-            printf(" %lc ", pieceSymbols[piece]);
+#ifdef USE_ESCAPE_CODES
+            if (IS_BLACK(piece)) {
+                printf("%s\e[0;30m%s\e[0m%s", COLUMN_SPACER, pieceSymbols[piece], COLUMN_SPACER);
+            } else {
+                printf("%s\e[0;90m%s\e[0m%s", COLUMN_SPACER, pieceSymbols[piece], COLUMN_SPACER);
+            }
+#else
+            printSpaced(pieceSymbols[piece]);
+#endif
             squareBlack = !squareBlack;
         }
         squareBlack = !squareBlack;
@@ -434,12 +508,14 @@ int main() {
     // Set up the initial board
     srand(time(0));
     memcpy(&chessBoard, &initial_board, sizeof(chessBoard));
-    printBoard(&chessBoard);
+    eraseBoard();
+    printf("\n\n"); printBoard(&chessBoard);
     // Play until no moves.
     int black = FALSE, move = 1;
-    while (from != -1) {
+    while (from != SQUARE_NONE) {
         findBestMove(black, &from, &to, &chessBoard, LOOKAHEAD);
-        if (from != -1) {
+        if (from != SQUARE_NONE) {
+            eraseBoard();
             // Make the best move
             int attacker = getSquare(&chessBoard, unpackRow(from), unpackCol(from));
             int target = getSquare(&chessBoard, unpackRow(to), unpackCol(to));
@@ -467,7 +543,7 @@ int main() {
             if (!black) ++move;
         }
     }
-    if (from == -1) {
+    if (from == SQUARE_NONE) {
         printf(inCheck(black, &chessBoard) ? "Checkmate.\n" : "Stalemate.\n");
     }
     printf("Game over.\n");
