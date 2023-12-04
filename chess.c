@@ -19,26 +19,30 @@
 
 // Debugging
 //#define DEBUG_MATES
+//#define DEBUG_EN_PASSANT
 
 //
 // Constants
 //
 
 // How many (half) moves to look ahead. At 4 things get quite slow.
-#define LOOKAHEAD 3
+#define LOOKAHEAD 1
 
 // Additional flags on pieces to indicate that they're
 // vulnerable to en passant, ineligible to castle, or
 // promoting to a different piece. TODO: Implement
 #define CAN_EN_PASSANT  (1<<8)
-#define CANNOT_CASTLE   (1<<9)
+#define IS_EN_PASSANT	(1<<9)
+#define CANNOT_CASTLE   (1<<10)
 #define FLAGS_START     (1<<8)
 #define NO_FLAGS(x)     ((x) % FLAGS_START)
+#define FLAGS(x)		((x) - NO_FLAGS(x))
 
 // Color Bias
 #define COLOR_WHITE     0
 #define COLOR_BLACK     (1<<3)
 #define IS_BLACK(x)     ((NO_FLAGS(x) / COLOR_BLACK) == 1)
+#define ADVANCE_DIRECTION(color)	((color) ? 1 : -1)
 
 // Pieces
 #define PIECE_PAWN      1
@@ -142,8 +146,8 @@ BOOL isValid(int myPiece, BARGS) { return isSquare(BPARAMS) && isDest(myPiece, B
 // Pack a row and column into an integer
 int pack(int row, int col) { return row * 8 + col; }
 // Unpack an integer to a row or column
-int unpackRow(int square) { return square / 8; }
-int unpackCol(int square) { return square % 8; }
+int unpackRow(int square) { return NO_FLAGS(square) / 8; }
+int unpackCol(int square) { return NO_FLAGS(square) % 8; }
 // Name of a square
 void printSquareName(int square) {
     int letter = (7 - unpackCol(square)) + 'a';
@@ -170,7 +174,13 @@ void printMove(int source, int dest, BOARDPTR_T(board)) {
     printf("%s", pieceLabels[PIECE(attacker)]);
     printSquareName(source);
     if (target != EMPTY_SQUARE) printf("x");
-    printSquareName(dest);
+	if (dest & IS_EN_PASSANT) {
+		// Report the destination of the attacker rather than the victim
+		printSquareName(dest + ADVANCE_DIRECTION(IS_BLACK(attacker)) * 8);
+		printf("e.p.");
+    } else {
+		printSquareName(dest);
+	}
     {
         // Test for pawn promotion
         int tryBoard[8][8], afterPiece;
@@ -197,7 +207,7 @@ int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
     int numDests = 0;
     int myPiece = asPiece;
     BOOL black = IS_BLACK(myPiece);
-    int blackSign = black ? 1 : -1;
+    int blackSign = ADVANCE_DIRECTION(black);
     int checkRow, checkCol;
     int deltaRow, deltaCol, delta, piece;
     switch (PIECE(myPiece)) {
@@ -217,12 +227,22 @@ int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
                 // Capture toward H
                 dests[numDests++] = pack(checkRow, col-1);
             }
+            if (isSquare(board, checkRow, col+1) && isEnemy(myPiece, board, row, col+1) &&
+				(getSquareWithFlags(board, row, col+1) & CAN_EN_PASSANT)) {
+                // Capture en passant toward A; sideways capture with extra forward move
+                dests[numDests++] = pack(row, col+1) | IS_EN_PASSANT;
+            }
+            if (isSquare(board, checkRow, col-1) && isEnemy(myPiece, board, row, col-1) &&
+				(getSquareWithFlags(board, row, col-1) & CAN_EN_PASSANT)) {
+                // Capture en passant toward H; sideways capture with extra forward move
+                dests[numDests++] = pack(row, col-1) | IS_EN_PASSANT;
+            }
             // Pawn's first move can be ahead two
             if (row == (black ? 1 : 6)) {
                 checkRow += blackSign;
                 if (isEmpty(board, checkRow, col)) {
                     // Forward move two
-                    dests[numDests++] = pack(checkRow, col);
+                    dests[numDests++] = pack(checkRow, col) | CAN_EN_PASSANT;
                 }
             }
             break;
@@ -307,13 +327,14 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL black, BOARDPTR_T(board)) {
     int moves[64], numMoves, numInfos = 0, row, col, move, piece;
     for (row = 0; row <= 7; row++) {
         for (col = 0; col <= 7; col++) {
-            piece = getSquare(BPARAMS);
+            piece = getSquareWithFlags(BPARAMS);
             if (piece == EMPTY_SQUARE) continue;
             if (IS_BLACK(piece) != black) continue;
+			(*board)[row][col] = piece & ~CAN_EN_PASSANT;	// Flag is no longer valid on our turn
             numMoves = getValidMoves(moves, BPARAMS);
             for (move = 0; move < numMoves; move++) {
                 moveInfo[numInfos + move].source = pack(row, col);
-                moveInfo[numInfos + move].dest = moves[move];
+                moveInfo[numInfos + move].dest = moves[move];	// Can include flags
                 moveInfo[numInfos + move].value = -EVAL_IN_CHECK;
             }
             numInfos += numMoves;
@@ -388,7 +409,22 @@ void tryMove(BOARDPTR_T(newBoard), int dest, BARGS) {
     if (piece == WHITE_PAWN && destRow == 0) piece = WHITE_QUEEN;
     if (piece == BLACK_PAWN && destRow == 7) piece = BLACK_QUEEN;
     (*newBoard)[row][col] = EMPTY_SQUARE;
-    (*newBoard)[destRow][destCol] = piece;
+	if (FLAGS(dest) & IS_EN_PASSANT) {
+    	int blackSign = ADVANCE_DIRECTION(black);
+    	(*newBoard)[destRow][destCol] = EMPTY_SQUARE;
+    	(*newBoard)[destRow+blackSign][destCol] = piece;
+#ifdef DEBUG_EN_PASSANT
+		printf("Pawn at "); printSquareName(pack(row, col));
+		printf(" trying en passant capture at "); printSquareName(dest); printf("\n");
+#endif
+	} else {
+    	(*newBoard)[destRow][destCol] = piece | (FLAGS(dest) & CAN_EN_PASSANT);
+	}
+#ifdef DEBUG_EN_PASSANT
+	if (FLAGS(dest) & CAN_EN_PASSANT) {
+		printf("Pawn moving to "); printSquareName(dest); printf(" is vulnerable to en passant.\n");
+	}
+#endif
 }
 
 int evalSort(const void* p1, const void* p2) {
