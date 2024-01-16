@@ -28,7 +28,7 @@ Known bugs:
 
 I gave myself this challenge after answering two chess-related questions on Quora. The first was whether an employer should be impressed that a candidate wrote a chess engine. The second was what's the next-worst chess engine after a "random mover."
 
-The bugfixes branch has incremental improvements to wwce to address the issues called out above. The main branch has the original 4 hour project. Don't code like this. MIT License. Have fun!
+The bugfixes branch (https://github.com/cyberabi/wwce/tree/bugfixes) has incremental improvements to wwce to address the issues called out above. The main branch has the original 4 hour project. Don't code like this. MIT License. Have fun!
 
 Chris Burke
 chris@cyberabi.com
