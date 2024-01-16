@@ -12,9 +12,10 @@
 // If your terminal window doesn't do VT100 codes, comment out USE_ESCAPE
 // Uncomment DONT_SCROLL if you want the board always drawn at top of window
 // Set COLUMN_SPACER to be "" or " " based on whatever looks good for you.
-//#define USE_CHESS_FONT
-//#define USE_ESCAPE_CODES
+#define USE_CHESS_FONT
+#define USE_ESCAPE_CODES
 //#define DONT_SCROLL
+//#define COLUMN_SPACER ""
 #define COLUMN_SPACER " "
 
 // Debugging
@@ -26,11 +27,11 @@
 //
 
 // How many (half) moves to look ahead. At 4 things get quite slow.
-#define LOOKAHEAD 1
+#define LOOKAHEAD 3
 
 // Additional flags on pieces to indicate that they're
 // vulnerable to en passant, ineligible to castle, or
-// promoting to a different piece. TODO: Implement
+// promoting to a different piece. TODO: Implement castling
 #define CAN_EN_PASSANT  (1<<8)
 #define IS_EN_PASSANT	(1<<9)
 #define CANNOT_CASTLE   (1<<10)
@@ -213,7 +214,6 @@ int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
     switch (PIECE(myPiece)) {
         // TODO: Test for moves that are illegal due to check
         case    PIECE_PAWN:
-            // TODO: Implement rules for en passant
             checkRow = row + blackSign;
             if (isSquare(board, checkRow, col) && isEmpty(board, checkRow, col)) {
                 // Forward move
@@ -245,6 +245,7 @@ int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
                     dests[numDests++] = pack(checkRow, col) | CAN_EN_PASSANT;
                 }
             }
+            // TODO: Update to allow for pawn promotion to Queen OR Knight
             break;
         case    PIECE_KNIGHT:
             for (deltaRow = -2; deltaRow <= 2; deltaRow++) {
@@ -406,6 +407,7 @@ void tryMove(BOARDPTR_T(newBoard), int dest, BARGS) {
     int destCol = unpackCol(dest);
     int destRow = unpackRow(dest);
     // Trivial pawn promotion - always to a queen
+    // TODO: Update to allow for pawn promotion to Queen OR Knight
     if (piece == WHITE_PAWN && destRow == 0) piece = WHITE_QUEEN;
     if (piece == BLACK_PAWN && destRow == 7) piece = BLACK_QUEEN;
     (*newBoard)[row][col] = EMPTY_SQUARE;
