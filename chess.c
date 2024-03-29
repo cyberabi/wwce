@@ -45,6 +45,9 @@
 #define IS_BLACK(x)     ((NO_FLAGS(x) / COLOR_BLACK) == 1)
 #define ADVANCE_DIRECTION(color)	((color) ? 1 : -1)
 
+// Pseudotype
+#define	PACKED_SQUARE	int
+
 // Pieces
 #define PIECE_PAWN      1
 #define PIECE_KNIGHT    2
@@ -90,6 +93,7 @@ static const int pieceValues[] = {
 
 #define SQUARE_NONE    -1
 #define EMPTY_SQUARE    0
+// NOTE: with this initialization, array row "0" is chess rank 8; array column 0 is chess file a
 static const int initial_board[8][8] =
 {
     BLACK_ROOK,     BLACK_KNIGHT,   BLACK_BISHOP,   BLACK_QUEEN,    BLACK_KING,     BLACK_BISHOP,   BLACK_KNIGHT,   BLACK_ROOK,
@@ -104,8 +108,8 @@ static const int initial_board[8][8] =
 
 static int chessBoard[8][8];
 typedef struct {
-    int source;
-    int dest;
+    PACKED_SQUARE source;
+    PACKED_SQUARE dest;
     int value;
 }   MOVEINFO;
 
@@ -120,7 +124,7 @@ static char** pieceSymbols = &pieceLabels[0];
 #endif
 
 int inCheck(int black, BOARDPTR_T(board));
-void tryMove(BOARDPTR_T(newBoard), int dest, BARGS);
+void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS);
 static int ruleOf75 = 0;
 
 //
@@ -130,9 +134,9 @@ static int ruleOf75 = 0;
 // Are the square coordinates valid?
 BOOL isSquare(BARGS) { return (row >= 0 && row <= 7 && col >= 0 && col <= 7); }
 // What's on the square (without flags, for now)
-BOOL getSquare(BARGS) { return NO_FLAGS((*board)[row][col]); }
+int getSquare(BARGS) { return NO_FLAGS((*board)[row][col]); }
 // What's on the square (with flags)
-BOOL getSquareWithFlags(BARGS) { return (*board)[row][col]; }
+int getSquareWithFlags(BARGS) { return (*board)[row][col]; }
 // Is the square empty?
 BOOL isEmpty(BARGS) { return (getSquare(BPARAMS) == EMPTY_SQUARE); }
 // Is the square occupied by an enemy?
@@ -145,14 +149,21 @@ BOOL isDest(int myPiece, BARGS) { return isEmpty(BPARAMS) || isEnemy(myPiece, BP
 // Considering bounds, is the square valid to move to?
 BOOL isValid(int myPiece, BARGS) { return isSquare(BPARAMS) && isDest(myPiece, BPARAMS); }
 // Pack a row and column into an integer
-int pack(int row, int col) { return row * 8 + col; }
+PACKED_SQUARE pack(int row, int col) { return row * 8 + col; }
 // Unpack an integer to a row or column
-int unpackRow(int square) { return NO_FLAGS(square) / 8; }
-int unpackCol(int square) { return NO_FLAGS(square) % 8; }
+int unpackRow(PACKED_SQUARE square) { return NO_FLAGS(square) / 8; }
+int unpackCol(PACKED_SQUARE square) { return NO_FLAGS(square) % 8; }
+
+// NOTE: array row 0 is chess rank "8"; array column 0 is chess file "a"
+// Packed King's Rook square by color
+PACKED_SQUARE kingsRookSquare(BOOL isBlack) { return isBlack ? pack(7, 7) : pack (0, 7); }
+// Packed Queen's Rook square by color
+PACKED_SQUARE queensRookSquare(BOOL isBlack) { return isBlack ? pack(7, 0) : pack (0, 0); }
 // Name of a square
-void printSquareName(int square) {
-    int letter = (7 - unpackCol(square)) + 'a';
-    printf("%c%d", letter, (7-unpackRow(square))+1);
+void printSquareName(PACKED_SQUARE square) {
+	int  rank = (7 - unpackRow(square)) + 1;
+    char file = (char)(unpackCol(square)) + 'a';
+    printf("%c%d", file, rank);
 }
 
 // Screen clear
@@ -169,7 +180,7 @@ void eraseBoard() {
 }
 
 // Move description
-void printMove(int source, int dest, BOARDPTR_T(board)) {
+void printMove(PACKED_SQUARE source, PACKED_SQUARE dest, BOARDPTR_T(board)) {
     int attacker = getSquare(board, unpackRow(source), unpackCol(source));
     int target = getSquare(board, unpackRow(dest), unpackCol(dest));
     printf("%s", pieceLabels[PIECE(attacker)]);
@@ -203,7 +214,7 @@ void printMove(int source, int dest, BOARDPTR_T(board)) {
 // Basic piece operations
 //
 
-int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
+int getValidMovesAsPiece(PACKED_SQUARE* dests, int asPiece, BARGS) {
     // Ignores what is actually on the square to simplify queen logic
     int numDests = 0;
     int myPiece = asPiece;
@@ -283,8 +294,8 @@ int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
                         checkRow = row + deltaRow * delta;
                         checkCol = col + deltaCol * delta;
                         if (!isValid(myPiece, board, checkRow, checkCol)) break;
-                        // Empty or capture
-                        dests[numDests++] = pack(checkRow, checkCol);
+                        // Empty or capture; once moved, a rook cannot castle
+                        dests[numDests++] = pack(checkRow, checkCol) | CANNOT_CASTLE;
                         if (!isEmpty(board, checkRow, checkCol)) break;
                         ++delta;
                     }
@@ -297,18 +308,20 @@ int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
             numDests += getValidMovesAsPiece(dests + numDests, black ? BLACK_ROOK : WHITE_ROOK, BPARAMS);
             break;
         case    PIECE_KING:
-            // TODO: Implement rules for castling (no prior moves, castling through check)
+			// Conventional moves
             for (deltaRow = -1; deltaRow <= 1; deltaRow++) {
                 for (deltaCol = -1; deltaCol <= 1; deltaCol++) {
                     if (deltaRow == 0 && deltaCol == 0) continue;
                     checkRow = row + deltaRow;
                     checkCol = col + deltaCol;
                     if (isValid(myPiece, board, checkRow, checkCol)) {
-                        // Empty or capture
-                        dests[numDests++] = pack(checkRow, checkCol);
+                        // Empty or capture; once moved, a king cannot castle
+                        dests[numDests++] = pack(checkRow, checkCol) | CANNOT_CASTLE;
                     }
                 }
             }
+            // TODO: Castling (no prior moves, castling through check)
+			// Downstream we detect castling as a move of two squares by the king
             break;
         default:
             break;
@@ -316,7 +329,7 @@ int getValidMovesAsPiece(int* dests, int asPiece, BARGS) {
     return numDests;
 }
 
-int getValidMoves(int* dests, BARGS) {
+int getValidMoves(PACKED_SQUARE* dests, BARGS) {
     // Uses the contents of the specified square
     return getValidMovesAsPiece(dests, getSquare(BPARAMS), BPARAMS);
 }
@@ -325,7 +338,8 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL black, BOARDPTR_T(board)) {
     // Find all moves the specified color can make
     // Passed array should be 1024 in size for 16 max
     // pieces x 64 max moves each
-    int moves[64], numMoves, numInfos = 0, row, col, move, piece;
+    PACKED_SQUARE moves[64];
+	int numMoves, numInfos = 0, row, col, move, piece;
     for (row = 0; row <= 7; row++) {
         for (col = 0; col <= 7; col++) {
             piece = getSquareWithFlags(BPARAMS);
@@ -346,7 +360,8 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL black, BOARDPTR_T(board)) {
 
 BOOL inCheck(int black, BOARDPTR_T(board)) {
     // Is the specified color in check?
-    int kingSquare = SQUARE_NONE, row, col, piece, move, ourKing;
+    PACKED_SQUARE kingSquare = SQUARE_NONE;
+	int row, col, piece, move, ourKing;
     // Find our king
     ourKing = black ? BLACK_KING : WHITE_KING;
     for (row = 0; row <= 7; row++) {
@@ -396,7 +411,7 @@ void copyBoard(BOARDPTR_T(board), BOARDPTR_T(tryBoard))
     memcpy(board, tryBoard, sizeof(*tryBoard));
 }
 
-void tryMove(BOARDPTR_T(newBoard), int dest, BARGS) {
+void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS) {
     // Tries moving the piece at row, col to dest
     // Copy active board to try board
     copyBoard(newBoard, board);
@@ -420,7 +435,7 @@ void tryMove(BOARDPTR_T(newBoard), int dest, BARGS) {
 		printf(" trying en passant capture at "); printSquareName(dest); printf("\n");
 #endif
 	} else {
-    	(*newBoard)[destRow][destCol] = piece | (FLAGS(dest) & CAN_EN_PASSANT);
+    	(*newBoard)[destRow][destCol] = piece | (FLAGS(dest) & (CAN_EN_PASSANT | CANNOT_CASTLE));
 	}
 #ifdef DEBUG_EN_PASSANT
 	if (FLAGS(dest) & CAN_EN_PASSANT) {
@@ -435,7 +450,7 @@ int evalSort(const void* p1, const void* p2) {
     return (m2->value - m1->value);
 }
 
-void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board), int lookAhead) {
+void findBestMove(BOOL black, PACKED_SQUARE* from, PACKED_SQUARE* to, BOARDPTR_T(board), int lookAhead) {
     // Returns coordinates of piece in *from, and its destination in *to.
     // To look ahead, creates a temporary board and finds the best move
     // of the opposing side, for each possible move.
@@ -448,8 +463,8 @@ void findBestMove(BOOL black, int* from, int* to, BOARDPTR_T(board), int lookAhe
     {
         BOOL laBlack = black;
         int laTurn;
-        int source = moveInfo[move].source;
-        int dest = moveInfo[move].dest;
+        PACKED_SQUARE source = moveInfo[move].source;
+        PACKED_SQUARE dest = moveInfo[move].dest;
 #ifdef DEBUG_MATES
         printf("Trying "); printMove(source, dest, board); printf("\n");
 #endif
@@ -517,8 +532,6 @@ void printSpaced(char* text) {
 
 void printBoard(BOARDPTR_T(board)) {
     int row, col, piece, pieceType, pieceColor, squareBlack = FALSE;
-    printf("  "); printSpaced("hgfedcba");
-    printf("\n  "); printSpaced("--------");
     for (row = 0; row <= 7; row++) {
         printf("\n%d|", (7 - row) + 1);
         for (col = 0; col <= 7; col++) {
@@ -538,11 +551,13 @@ void printBoard(BOARDPTR_T(board)) {
         }
         squareBlack = !squareBlack;
     }
-    printf("\n");
+    printf("\n  "); printSpaced("--------");
+    printf("\n  "); printSpaced("abcdefgh");
+	printf("\n");
 }
 
 int main() {
-    int from = 0, to = 0;
+    PACKED_SQUARE from = 0, to = 0;
     // Set up the initial board
     srand(time(0));
     memcpy(&chessBoard, &initial_board, sizeof(chessBoard));
