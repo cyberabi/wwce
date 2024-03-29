@@ -33,20 +33,20 @@
 // vulnerable to en passant, ineligible to castle, or
 // promoting to a different piece. TODO: Implement castling
 #define CAN_EN_PASSANT  (1<<8)
-#define IS_EN_PASSANT	(1<<9)
+#define IS_EN_PASSANT   (1<<9)
 #define CANNOT_CASTLE   (1<<10)
 #define FLAGS_START     (1<<8)
 #define NO_FLAGS(x)     ((x) % FLAGS_START)
-#define FLAGS(x)		((x) - NO_FLAGS(x))
+#define FLAGS(x)        ((x) - NO_FLAGS(x))
 
 // Color Bias
 #define COLOR_WHITE     0
 #define COLOR_BLACK     (1<<3)
 #define IS_BLACK(x)     ((NO_FLAGS(x) / COLOR_BLACK) == 1)
-#define ADVANCE_DIRECTION(color)	((color) ? 1 : -1)
+#define ADVANCE_DIRECTION(color)    ((color) ? 1 : -1)
 
 // Pseudotype
-#define	PACKED_SQUARE	int
+#define PACKED_SQUARE   int
 
 // Pieces
 #define PIECE_PAWN      1
@@ -161,7 +161,7 @@ PACKED_SQUARE kingsRookSquare(BOOL isBlack) { return isBlack ? pack(7, 7) : pack
 PACKED_SQUARE queensRookSquare(BOOL isBlack) { return isBlack ? pack(7, 0) : pack (0, 0); }
 // Name of a square
 void printSquareName(PACKED_SQUARE square) {
-	int  rank = (7 - unpackRow(square)) + 1;
+    int  rank = (7 - unpackRow(square)) + 1;
     char file = (char)(unpackCol(square)) + 'a';
     printf("%c%d", file, rank);
 }
@@ -186,13 +186,13 @@ void printMove(PACKED_SQUARE source, PACKED_SQUARE dest, BOARDPTR_T(board)) {
     printf("%s", pieceLabels[PIECE(attacker)]);
     printSquareName(source);
     if (target != EMPTY_SQUARE) printf("x");
-	if (dest & IS_EN_PASSANT) {
-		// Report the destination of the attacker rather than the victim
-		printSquareName(dest + ADVANCE_DIRECTION(IS_BLACK(attacker)) * 8);
-		printf("e.p.");
+    if (dest & IS_EN_PASSANT) {
+        // Report the destination of the attacker rather than the victim
+        printSquareName(dest + ADVANCE_DIRECTION(IS_BLACK(attacker)) * 8);
+        printf("e.p.");
     } else {
-		printSquareName(dest);
-	}
+        printSquareName(dest);
+    }
     {
         // Test for pawn promotion
         int tryBoard[8][8], afterPiece;
@@ -239,12 +239,12 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, int asPiece, BARGS) {
                 dests[numDests++] = pack(checkRow, col-1);
             }
             if (isSquare(board, checkRow, col+1) && isEnemy(myPiece, board, row, col+1) &&
-				(getSquareWithFlags(board, row, col+1) & CAN_EN_PASSANT)) {
+                (getSquareWithFlags(board, row, col+1) & CAN_EN_PASSANT)) {
                 // Capture en passant toward A; sideways capture with extra forward move
                 dests[numDests++] = pack(row, col+1) | IS_EN_PASSANT;
             }
             if (isSquare(board, checkRow, col-1) && isEnemy(myPiece, board, row, col-1) &&
-				(getSquareWithFlags(board, row, col-1) & CAN_EN_PASSANT)) {
+                (getSquareWithFlags(board, row, col-1) & CAN_EN_PASSANT)) {
                 // Capture en passant toward H; sideways capture with extra forward move
                 dests[numDests++] = pack(row, col-1) | IS_EN_PASSANT;
             }
@@ -308,7 +308,7 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, int asPiece, BARGS) {
             numDests += getValidMovesAsPiece(dests + numDests, black ? BLACK_ROOK : WHITE_ROOK, BPARAMS);
             break;
         case    PIECE_KING:
-			// Conventional moves
+            // Conventional moves
             for (deltaRow = -1; deltaRow <= 1; deltaRow++) {
                 for (deltaCol = -1; deltaCol <= 1; deltaCol++) {
                     if (deltaRow == 0 && deltaCol == 0) continue;
@@ -321,7 +321,7 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, int asPiece, BARGS) {
                 }
             }
             // TODO: Castling (no prior moves, castling through check)
-			// Downstream we detect castling as a move of two squares by the king
+            // Downstream we detect castling as a move of two squares by the king
             break;
         default:
             break;
@@ -339,17 +339,17 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL black, BOARDPTR_T(board)) {
     // Passed array should be 1024 in size for 16 max
     // pieces x 64 max moves each
     PACKED_SQUARE moves[64];
-	int numMoves, numInfos = 0, row, col, move, piece;
+    int numMoves, numInfos = 0, row, col, move, piece;
     for (row = 0; row <= 7; row++) {
         for (col = 0; col <= 7; col++) {
             piece = getSquareWithFlags(BPARAMS);
             if (piece == EMPTY_SQUARE) continue;
             if (IS_BLACK(piece) != black) continue;
-			(*board)[row][col] = piece & ~CAN_EN_PASSANT;	// Flag is no longer valid on our turn
+            (*board)[row][col] = piece & ~CAN_EN_PASSANT;    // Flag is no longer valid on our turn
             numMoves = getValidMoves(moves, BPARAMS);
             for (move = 0; move < numMoves; move++) {
                 moveInfo[numInfos + move].source = pack(row, col);
-                moveInfo[numInfos + move].dest = moves[move];	// Can include flags
+                moveInfo[numInfos + move].dest = moves[move];    // Can include flags
                 moveInfo[numInfos + move].value = -EVAL_IN_CHECK;
             }
             numInfos += numMoves;
@@ -361,7 +361,7 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL black, BOARDPTR_T(board)) {
 BOOL inCheck(int black, BOARDPTR_T(board)) {
     // Is the specified color in check?
     PACKED_SQUARE kingSquare = SQUARE_NONE;
-	int row, col, piece, move, ourKing;
+    int row, col, piece, move, ourKing;
     // Find our king
     ourKing = black ? BLACK_KING : WHITE_KING;
     for (row = 0; row <= 7; row++) {
@@ -426,21 +426,21 @@ void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS) {
     if (piece == WHITE_PAWN && destRow == 0) piece = WHITE_QUEEN;
     if (piece == BLACK_PAWN && destRow == 7) piece = BLACK_QUEEN;
     (*newBoard)[row][col] = EMPTY_SQUARE;
-	if (FLAGS(dest) & IS_EN_PASSANT) {
-    	int blackSign = ADVANCE_DIRECTION(black);
-    	(*newBoard)[destRow][destCol] = EMPTY_SQUARE;
-    	(*newBoard)[destRow+blackSign][destCol] = piece;
+    if (FLAGS(dest) & IS_EN_PASSANT) {
+        int blackSign = ADVANCE_DIRECTION(black);
+        (*newBoard)[destRow][destCol] = EMPTY_SQUARE;
+        (*newBoard)[destRow+blackSign][destCol] = piece;
 #ifdef DEBUG_EN_PASSANT
-		printf("Pawn at "); printSquareName(pack(row, col));
-		printf(" trying en passant capture at "); printSquareName(dest); printf("\n");
+        printf("Pawn at "); printSquareName(pack(row, col));
+        printf(" trying en passant capture at "); printSquareName(dest); printf("\n");
 #endif
-	} else {
-    	(*newBoard)[destRow][destCol] = piece | (FLAGS(dest) & (CAN_EN_PASSANT | CANNOT_CASTLE));
-	}
+    } else {
+        (*newBoard)[destRow][destCol] = piece | (FLAGS(dest) & (CAN_EN_PASSANT | CANNOT_CASTLE));
+    }
 #ifdef DEBUG_EN_PASSANT
-	if (FLAGS(dest) & CAN_EN_PASSANT) {
-		printf("Pawn moving to "); printSquareName(dest); printf(" is vulnerable to en passant.\n");
-	}
+    if (FLAGS(dest) & CAN_EN_PASSANT) {
+        printf("Pawn moving to "); printSquareName(dest); printf(" is vulnerable to en passant.\n");
+    }
 #endif
 }
 
@@ -553,7 +553,7 @@ void printBoard(BOARDPTR_T(board)) {
     }
     printf("\n  "); printSpaced("--------");
     printf("\n  "); printSpaced("abcdefgh");
-	printf("\n");
+    printf("\n");
 }
 
 int main() {
