@@ -19,26 +19,37 @@
 // Set COLUMN_SPACER to be "" or " " based on whatever looks good for you.
 #define USE_CHESS_FONT
 #define USE_ESCAPE_CODES
-//#define DONT_SCROLL
-//#define COLUMN_SPACER ""
-//#define COLUMN_SPACER_BLACK_LEFT ""
-//#define COLUMN_SPACER_BLACK_RIGHT ""
+#define USE_SPACERS
+
+#ifdef USE_SPACERS
 #define COLUMN_SPACER " "
-#define COLUMN_SPACER_BLACK_LEFT "["
-#define COLUMN_SPACER_BLACK_RIGHT "]"
+#define COLUMN_SPACER_WHITE_LEFT  " "
+#define COLUMN_SPACER_WHITE_RIGHT " "
+#define COLUMN_SPACER_BLACK_LEFT  " "
+#define COLUMN_SPACER_BLACK_RIGHT " "
+#else
+#define DONT_SCROLL
+#define COLUMN_SPACER ""
+#define COLUMN_SPACER_WHITE_LEFT  ""
+#define COLUMN_SPACER_WHITE_RIGHT ""
+#define COLUMN_SPACER_BLACK_LEFT  ""
+#define COLUMN_SPACER_BLACK_RIGHT ""
+#endif
 
 // Debugging
 //#define DEBUG_MATES
 //#define DEBUG_EN_PASSANT
 //#define DEBUG_CHECKS
 //#define DEBUG_CASTLING
+//#define DEBUG_PROMOTION
 
 //
 // Constants
 //
 
 // How many (half) moves to look ahead. At 4 things get quite slow.
-#define LOOKAHEAD 0
+// Some debugging works best with this set to 0
+#define LOOKAHEAD 3
 
 // Additional flags on pieces OR destination squares
 // to indicate that they're vulnerable to en passant,
@@ -47,6 +58,7 @@
 #define IS_EN_PASSANT   (1<<9)
 #define CANNOT_CASTLE   (1<<10)
 #define IS_CASTLE       (1<<11)
+#define IS_KNIGHT_PROMO (1<<12)
 #define FLAGS_START     (1<<8)
 #define NO_FLAGS(x)     ((x) % FLAGS_START)
 #define FLAGS(x)        ((x) - NO_FLAGS(x))
@@ -172,10 +184,6 @@ PIECE_T getSquarePacked(BOARDPTR_T(board), PACKED_SQUARE source) { return getSqu
 PIECE_T getSquareWithFlagsPacked(BOARDPTR_T(board), PACKED_SQUARE source) { return getSquareWithFlags(board, unpackRow(source), unpackCol(source)); }
 
 // NOTE: array row 0 is chess rank "8"; array column 0 is chess file "a"
-// Packed King's Rook square by color
-PACKED_SQUARE kingsRookSquare(BOOL isBlack) { return isBlack ? pack(7, 7) : pack (0, 7); }
-// Packed Queen's Rook square by color
-PACKED_SQUARE queensRookSquare(BOOL isBlack) { return isBlack ? pack(7, 0) : pack (0, 0); }
 // Packed King's square by color
 PACKED_SQUARE kingsSquare(BOOL isBlack, BOARDPTR_T(board)) {
     PACKED_SQUARE kingSquare = SQUARE_NONE;
@@ -228,19 +236,16 @@ void printMove(PACKED_SQUARE source, PACKED_SQUARE dest, BOARDPTR_T(board)) {
         if (unpackCol(dest) < 4) printf("O-O-O");
         else printf("O-O");
 	}
-    else
-    {
+    else {
         printf("%s", pieceLabels[PIECE(attacker)]);
         printSquareName(source);
         if (target != EMPTY_SQUARE) printf("x");
         if (dest & IS_EN_PASSANT) {
             // Report the destination of the attacker rather than the victim
             printSquareName(dest + ADVANCE_DIRECTION(IS_BLACK(attacker)) * 8);
-            printf("e.p.");
+            printf(" e.p.");
         } else {
             printSquareName(dest);
-        }
-        {
             // Test for pawn promotion
             tryMove(&tryBoard, dest, board, sourceRow, sourceCol);
             PIECE_T afterPiece = getSquare(&tryBoard, destRow, destCol);
@@ -270,9 +275,12 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest
     int blackSign = ADVANCE_DIRECTION(black);
     int checkRow, checkCol;
     int deltaRow, deltaCol, delta;
+    BOOL promotion;
     switch (PIECE(myPiece)) {
         // TODO: Test for moves that are illegal due to check
         case    PIECE_PAWN:
+            // Prevent en passant flag from persisting for more than one turn
+            (*board)[row][col] &= ~CAN_EN_PASSANT;
             checkRow = row + blackSign;
             if (isSquare(board, checkRow, col) && isEmpty(board, checkRow, col)) {
                 // Forward move
@@ -300,12 +308,17 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest
             if (row == (black ? 1 : 6)) {
                 checkRow += blackSign;
                 if (isEmpty(board, checkRow, col)) {
-                    // Forward move two; this makes the pawn vulnerable to en passant capture
+                    // Forward move two; this makes the pawn vulnerable to en passant capture for ONE MOVE ONLY
                     // Temporarily store the flag on the DESTINATION rather than on the PIECE
                     dests[numDests++] = pack(checkRow, col) | CAN_EN_PASSANT;
                 }
             }
-            // TODO: Update to allow for pawn promotion to Queen OR Knight
+            // Allow for pawn promotion to Queen OR Knight. The move already recorded is for queen
+            promotion = (checkRow == 0) || (checkRow == 7);
+            if (promotion) {
+                PACKED_SQUARE knightPromo = dests[numDests-1] | IS_KNIGHT_PROMO;
+                dests[numDests++] = knightPromo;
+            }
             break;
         case    PIECE_KNIGHT:
             for (deltaRow = -2; deltaRow <= 2; deltaRow++) {
@@ -499,10 +512,10 @@ void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS) {
     int destCol = unpackCol(dest);
     int destRow = unpackRow(dest);
     int oldPiece = getSquare(newBoard, destRow, destCol);
-    // Trivial pawn promotion - always to a queen
-    // TODO: Update to allow for pawn promotion to Queen OR Knight
-    if (piece == WHITE_PAWN && destRow == 0) piece = WHITE_QUEEN;
-    if (piece == BLACK_PAWN && destRow == 7) piece = BLACK_QUEEN;
+    // Simplified pawn promotion to a queen or a knight
+    // This leaves out some edge cases where a rook or bishop is preferable to a queen to avoid stalemate
+    if (piece == WHITE_PAWN && destRow == 0) piece = FLAGS(dest & IS_KNIGHT_PROMO) ? WHITE_KNIGHT : WHITE_QUEEN;
+    if (piece == BLACK_PAWN && destRow == 7) piece = FLAGS(dest & IS_KNIGHT_PROMO) ? BLACK_KNIGHT : BLACK_QUEEN;
     (*newBoard)[row][col] = EMPTY_SQUARE;
     if (FLAGS(dest) & IS_EN_PASSANT) {
         // en passant capture removes the piece with CAN_EN_PASSANT from the board
@@ -604,6 +617,13 @@ void findBestMove(BOOL isBlack, PACKED_SQUARE* from, PACKED_SQUARE* to, BOARDPTR
             moveInfo[move].value = EVAL_FORCE;
         }
 #endif
+#ifdef DEBUG_PROMOTION
+        // Test code to always castle when we can
+        if (FLAGS(dest) & IS_KNIGHT_PROMO) {
+            printf("Forcing promotion to knight\n");
+            moveInfo[move].value = EVAL_FORCE;
+        }
+#endif
         ++validMoves;
     }
     if (validMoves > 0) {
@@ -643,6 +663,10 @@ void printBlackSpacedChar(char c) {
     printf("%s%c%s", COLUMN_SPACER_BLACK_LEFT, c, COLUMN_SPACER_BLACK_RIGHT);
 }
 
+void printWhiteSpacedChar(char c) {
+    printf("%s%c%s", COLUMN_SPACER_WHITE_LEFT, c, COLUMN_SPACER_WHITE_RIGHT);
+}
+
 void printSpaced(char* text) {
     char c;
     while ('\0' != (c = *text++)) printSpacedChar(c);
@@ -651,6 +675,11 @@ void printSpaced(char* text) {
 void printBlackSpaced(char* text) {
     char c;
     while ('\0' != (c = *text++)) printBlackSpacedChar(c);
+}
+
+void printWhiteSpaced(char* text) {
+    char c;
+    while ('\0' != (c = *text++)) printWhiteSpacedChar(c);
 }
 
 void printBoard(BOARDPTR_T(board)) {
@@ -663,18 +692,18 @@ void printBoard(BOARDPTR_T(board)) {
             if (piece == EMPTY_SQUARE)
                 piece +=  isBlackSquare ? COLOR_BLACK : COLOR_WHITE;
 #ifdef USE_ESCAPE_CODES
-            char* columnSpacerLeft = isBlackSquare ? COLUMN_SPACER_BLACK_LEFT : COLUMN_SPACER;
-            char* columnSpacerRight = isBlackSquare ? COLUMN_SPACER_BLACK_RIGHT : COLUMN_SPACER;
-            if (IS_BLACK(piece)) {
-                printf("%s\e[0;30m%s\e[0m%s", columnSpacerLeft, pieceSymbols[piece], columnSpacerRight);
+            char* columnSpacerLeft = isBlackSquare ? COLUMN_SPACER_BLACK_LEFT : COLUMN_SPACER_WHITE_LEFT;
+            char* columnSpacerRight = isBlackSquare ? COLUMN_SPACER_BLACK_RIGHT : COLUMN_SPACER_WHITE_RIGHT;
+            if (isBlackSquare) {
+                printf("\e[42m%s%s%s\e[0m", columnSpacerLeft, pieceSymbols[piece], columnSpacerRight);
             } else {
-                printf("%s\e[0;90m%s\e[0m%s", columnSpacerLeft, pieceSymbols[piece], columnSpacerRight);
+                printf("\e[47m%s%s%s\e[0m", columnSpacerLeft, pieceSymbols[piece], columnSpacerRight);
             }
 #else
             if (isBlackSquare)
                 printBlackSpaced(pieceSymbols[piece]);
             else
-                printSpaced(pieceSymbols[piece]);
+                printWhiteSpaced(pieceSymbols[piece]);
 #endif
         }
     }
