@@ -1,7 +1,7 @@
 # wwce
 World's Worst Chess Engine
 
-I challenged myself to write a rudimenatary chess engine in four hours. That initial challenge was a qualified success, and you can find it on the main branch. Here on the bugfixes branch I'm making small improvements and bug fixes based on that initial four hour work. Total time invested will still be about 8 hours.
+I challenged myself to write a rudimenatary chess engine in four hours. That initial challenge was a qualified success, and you can find it on the main branch. Here on the bugfixes branch I'm making small improvements and bug fixes based on that initial four hour work. The resulting executable is under 1000 lines of code including comments, and under 64K compiled (on a Macbook).
 
 Currently not implemented:
 1) Human player input (plays only with itself)
