@@ -9,7 +9,7 @@ Currently not implemented:
 Changes that would make it a better engine:
 1) Understanding of openings
 2) Understanding of end game
-3) Better position evaluation (currently avoids check and min-maxes the point value of pieces remaining on the board)
+3) Better position evaluation (currently avoids check and stalemate, seeks checkmate, and min-maxes the point value of pieces remaining on the board)
 
 Known bugs:
 
