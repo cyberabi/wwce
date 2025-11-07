@@ -1,7 +1,7 @@
 # wwce
 World's Worst Chess Engine
 
-I challenged myself to write a rudimenatary chess engine in four hours. That initial challenge was a qualified success.
+I challenged myself to write a rudimenatary chess engine in four hours. That initial challenge was a qualified success. The resulting executable is under 1000 lines of code including comments, and under 64K compiled (on a Macbook).
 
 Here's what's missing to make it really Chess:
 1) Pawn promotion
