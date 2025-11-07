@@ -31,13 +31,14 @@
 //#define DEBUG_MATES
 //#define DEBUG_EN_PASSANT
 //#define DEBUG_CHECKS
+//#define DEBUG_CASTLING
 
 //
 // Constants
 //
 
 // How many (half) moves to look ahead. At 4 things get quite slow.
-#define LOOKAHEAD 3
+#define LOOKAHEAD 0
 
 // Additional flags on pieces OR destination squares
 // to indicate that they're vulnerable to en passant,
@@ -45,6 +46,7 @@
 #define CAN_EN_PASSANT  (1<<8)
 #define IS_EN_PASSANT   (1<<9)
 #define CANNOT_CASTLE   (1<<10)
+#define IS_CASTLE       (1<<11)
 #define FLAGS_START     (1<<8)
 #define NO_FLAGS(x)     ((x) % FLAGS_START)
 #define FLAGS(x)        ((x) - NO_FLAGS(x))
@@ -96,6 +98,7 @@ static const PIECE_T pieceValues[] = {
 // Boards
 #define MAX_POSSIBLE_MOVES 1024
 #define EVAL_IN_CHECK   10000
+#define EVAL_FORCE      9999
 #define BARGS           BOARDPTR_T(board), int row, int col
 #define BPARAMS         board, row, col
 
@@ -132,6 +135,7 @@ static char** pieceSymbols = &pieceLabels[0];
 #endif
 
 BOOL inCheck(BOOL isBlack, BOARDPTR_T(board));
+BOOL inCheckKnownKingSquare(PACKED_SQUARE kingSquare, BOARDPTR_T(board));
 void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS);
 static int ruleOf75 = 0;
 
@@ -213,32 +217,43 @@ void eraseBoard() {
 
 // Move description
 void printMove(PACKED_SQUARE source, PACKED_SQUARE dest, BOARDPTR_T(board)) {
-    PIECE_T attacker = getSquare(board, unpackRow(source), unpackCol(source));
-    PIECE_T target = getSquare(board, unpackRow(dest), unpackCol(dest));
-    printf("%s", pieceLabels[PIECE(attacker)]);
-    printSquareName(source);
-    if (target != EMPTY_SQUARE) printf("x");
-    if (dest & IS_EN_PASSANT) {
-        // Report the destination of the attacker rather than the victim
-        printSquareName(dest + ADVANCE_DIRECTION(IS_BLACK(attacker)) * 8);
-        printf("e.p.");
-    } else {
-        printSquareName(dest);
-    }
+    PIECE_T tryBoard[8][8];
+    int sourceRow = unpackRow(source);
+    int sourceCol = unpackCol(source);
+    int destRow = unpackRow(dest);
+    int destCol = unpackCol(dest);
+    PIECE_T attacker = getSquare(board, sourceRow, sourceCol);
+    PIECE_T target = getSquare(board, destRow, destCol);
+    if (dest & IS_CASTLE) {
+        if (unpackCol(dest) < 4) printf("O-O-O");
+        else printf("O-O");
+	}
+    else
     {
-        // Test for pawn promotion
-        PIECE_T tryBoard[8][8], afterPiece;
-        tryMove(&tryBoard, dest, board, unpackRow(source), unpackCol(source));
-        afterPiece = getSquare(&tryBoard, unpackRow(dest), unpackCol(dest));
-        if (PIECE(attacker) == PIECE_PAWN && PIECE(afterPiece) != PIECE_PAWN) {
-            printf("%s", pieceLabels[PIECE(afterPiece)]);
+        printf("%s", pieceLabels[PIECE(attacker)]);
+        printSquareName(source);
+        if (target != EMPTY_SQUARE) printf("x");
+        if (dest & IS_EN_PASSANT) {
+            // Report the destination of the attacker rather than the victim
+            printSquareName(dest + ADVANCE_DIRECTION(IS_BLACK(attacker)) * 8);
+            printf("e.p.");
+        } else {
+            printSquareName(dest);
         }
-        // Test for check
-        BOOL attackerBlack = IS_BLACK(attacker);
-        if (inCheck(!attackerBlack, &tryBoard)) {
-            //  Check!
-            printf("+");
+        {
+            // Test for pawn promotion
+            tryMove(&tryBoard, dest, board, sourceRow, sourceCol);
+            PIECE_T afterPiece = getSquare(&tryBoard, destRow, destCol);
+            if (PIECE(attacker) == PIECE_PAWN && PIECE(afterPiece) != PIECE_PAWN) {
+                printf("%s", pieceLabels[PIECE(afterPiece)]);
+            }
         }
+    }
+    // Test for check
+    tryMove(&tryBoard, dest, board, sourceRow, sourceCol);
+    if (inCheck(!IS_BLACK(attacker), &tryBoard)) {
+        //  Check!
+        printf("+");
     }
 }
 
@@ -246,8 +261,9 @@ void printMove(PACKED_SQUARE source, PACKED_SQUARE dest, BOARDPTR_T(board)) {
 // Basic piece operations
 //
 
-int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BARGS) {
+int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest, BARGS) {
     // Ignores what is actually on the square to simplify queen logic
+    // WARNING: There are no flags in asPiece
     int numDests = 0;
     PIECE_T myPiece = asPiece;
     BOOL black = IS_BLACK(myPiece);
@@ -337,8 +353,8 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BARGS) {
             break;
         case    PIECE_QUEEN:
             // Sum of possible bishop and rook moves
-            numDests = getValidMovesAsPiece(dests, black ? BLACK_BISHOP : WHITE_BISHOP, BPARAMS);
-            numDests += getValidMovesAsPiece(dests + numDests, black ? BLACK_ROOK : WHITE_ROOK, BPARAMS);
+            numDests = getValidMovesAsPiece(dests, black ? BLACK_BISHOP : WHITE_BISHOP, noCheckTest, BPARAMS);
+            numDests += getValidMovesAsPiece(dests + numDests, black ? BLACK_ROOK : WHITE_ROOK, noCheckTest, BPARAMS);
             break;
         case    PIECE_KING:
             // Conventional moves
@@ -354,8 +370,37 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BARGS) {
                     }
                 }
             }
-            // TODO: Castling (no prior moves, castling through check)
-            // Downstream we detect castling as a move of two squares by the king
+            // Castling
+            // NOTE: noCheckTest prevents infinite recursion when evaluating legal moves and check
+            PIECE_T king = getSquareWithFlags(board, row, col);
+            if (!(FLAGS(king) & CANNOT_CASTLE) && (noCheckTest || !inCheck(black, board))) {
+                for (int kingSide = 0; kingSide <= 1; kingSide++) {
+                    int rookCol = kingSide * 7;
+                    int moveSign = -1 + (2 * kingSide);
+                    int checkCol = col + (2 * moveSign);
+                    PIECE_T rook = getSquareWithFlags(board, row, rookCol);
+                    if ((PIECE(rook) == PIECE_ROOK) && !(FLAGS(rook) & CANNOT_CASTLE) &&
+                        isEmpty(board, row, col + moveSign) && isEmpty(board, row, checkCol) &&
+                        (kingSide || isEmpty(board, row, checkCol + moveSign))) {
+                        // Legal to castle on this side (unless moving through or into check)
+                        // findBestMove will handle the case where we end up in check, but test the first square
+                        BOOL isInCheck;
+                        (*board)[row][col] = EMPTY_SQUARE;
+                        (*board)[row][col + moveSign] = king;
+                        {
+                            isInCheck = noCheckTest || inCheck(black, board);
+                        }
+                        (*board)[row][col + moveSign] = EMPTY_SQUARE;
+                        (*board)[row][col] = king;
+                        if (!isInCheck) {
+#ifdef DEBUG_CASTLING
+                            printf("\n%s can try to castle %sside\n", COLOR_NAME(black), kingSide ? "king" : "queen");
+#endif
+                            dests[numDests++] = pack(row, checkCol) | (CANNOT_CASTLE | IS_CASTLE);
+                        }
+                    }
+                }
+            }
             break;
         default:
             break;
@@ -363,13 +408,13 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BARGS) {
     return numDests;
 }
 
-int getValidMoves(PACKED_SQUARE* dests, BARGS) {
+int getValidMoves(PACKED_SQUARE* dests, BOOL noCheckTest, BARGS) {
     // Uses the contents of the specified square
     // Note: does not test whether our king is in check after these moves
-    return getValidMovesAsPiece(dests, getSquare(BPARAMS), BPARAMS);
+    return getValidMovesAsPiece(dests, getSquare(BPARAMS), noCheckTest, BPARAMS);
 }
 
-int getAllMoves(MOVEINFO* moveInfo, BOOL isBlack, BOARDPTR_T(board)) {
+int getAllMoves(MOVEINFO* moveInfo, BOOL isBlack, BOOL noCheckTest, BOARDPTR_T(board)) {
     // Find all moves the specified color can make
     // Passed array should be 1024 in size for 16 max
     // pieces x 64 max moves each
@@ -383,7 +428,7 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL isBlack, BOARDPTR_T(board)) {
             if (piece == EMPTY_SQUARE) continue;
             if (IS_BLACK(piece) != isBlack) continue;
             (*board)[row][col] = piece & ~CAN_EN_PASSANT;       // Flag is no longer valid on our turn
-            numMoves = getValidMoves(moves, BPARAMS);
+            numMoves = getValidMoves(moves, noCheckTest, BPARAMS);
             for (move = 0; move < numMoves; move++) {
                 moveInfo[numInfos + move].source = pack(row, col);
                 moveInfo[numInfos + move].dest = moves[move];   // Can include flags
@@ -399,10 +444,10 @@ BOOL inCheckKnownKingSquare(PACKED_SQUARE kingSquare, BOARDPTR_T(board)) {
     // Is the specified square, containing a king, in check?
     int move;
     int ourKing = getSquare(board, unpackRow(kingSquare), unpackCol(kingSquare));
-	BOOL isBlack = IS_BLACK(ourKing);
+    BOOL isBlack = IS_BLACK(ourKing);
     // Find all valid enemy moves (no lookahead)
     MOVEINFO moveInfo[MAX_POSSIBLE_MOVES];
-    int numInfos = getAllMoves(moveInfo, !isBlack, board);
+    int numInfos = getAllMoves(moveInfo, !isBlack, TRUE, board);
     // See if any enemy move targets the king's square
     for (move = 0; move < numInfos; move++) {
         if (NO_FLAGS(moveInfo[move].dest) == kingSquare) {
@@ -476,6 +521,22 @@ void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS) {
             printf("Pawn moving to "); printSquareName(dest); printf(" is vulnerable to en passant.\n");
         }
 #endif
+        if (FLAGS(dest) & IS_CASTLE) {
+            // Castling moves two pieces. Only the king move is packed, so we also have to move the rook.
+            BOOL queenSide = (destCol < 4);
+#ifdef DEBUG_CASTLING
+            printf("Trying to castle to "); printSquareName(dest); printf("\n");
+#endif
+            if (queenSide) {
+                // Queenside
+                (*newBoard)[destRow][3] = (*newBoard)[destRow][0] | CANNOT_CASTLE;
+                (*newBoard)[destRow][0] = EMPTY_SQUARE;
+            } else {
+                // Kingside
+                (*newBoard)[destRow][5] = (*newBoard)[destRow][7] | CANNOT_CASTLE;
+                (*newBoard)[destRow][7] = EMPTY_SQUARE;
+            }
+        }
     }
 #ifdef DEBUG_CHECKS
     if (oldPiece == BLACK_KING || oldPiece == WHITE_KING) {
@@ -499,10 +560,9 @@ void findBestMove(BOOL isBlack, PACKED_SQUARE* from, PACKED_SQUARE* to, BOARDPTR
     PIECE_T tryBoard[8][8];
     MOVEINFO moveInfo[MAX_POSSIBLE_MOVES];
     // Get all the moves
-    numInfos = getAllMoves(moveInfo, isBlack, board);
+    numInfos = getAllMoves(moveInfo, isBlack, FALSE, board);
     // Evaluate each move (moves that leave us in check remain -EVAL_IN_CHECK)
-    for (move = 0; move < numInfos; move++)
-    {
+    for (move = 0; move < numInfos; move++) {
         BOOL laBlack = isBlack;
         int laTurn;
         PACKED_SQUARE source = moveInfo[move].source;
@@ -537,6 +597,13 @@ void findBestMove(BOOL isBlack, PACKED_SQUARE* from, PACKED_SQUARE* to, BOARDPTR
         // contemplated move is still valid unless it happened before lookahead
         if (laTurn == lookAhead && inCheck(isBlack, &tryBoard)) continue;
         moveInfo[move].value = evaluatePosition(isBlack, &tryBoard);
+#ifdef DEBUG_CASTLING
+        // Test code to always castle when we can
+        if (FLAGS(dest) & IS_CASTLE) {
+            printf("Forcing castling\n");
+            moveInfo[move].value = EVAL_FORCE;
+        }
+#endif
         ++validMoves;
     }
     if (validMoves > 0) {
