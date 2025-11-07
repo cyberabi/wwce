@@ -47,7 +47,7 @@
 // Constants
 //
 
-// How many (half) moves to look ahead. At 4 things get quite slow.
+// How many (half) moves to look ahead.
 // Some debugging works best with this set to 0
 #define LOOKAHEAD 3
 
@@ -87,6 +87,10 @@
 #define VALUE_ROOK      5
 #define VALUE_QUEEN     9
 #define VALUE_KING      1000
+
+#define VALUE_STALEMATE 5000
+#define VALUE_CHECKMATE 10000
+#define VALUE_ILLEGAL   -32767
 
 static const PIECE_T pieceValues[] = {
     0,              VALUE_PAWN,     VALUE_KNIGHT,   VALUE_BISHOP,   VALUE_ROOK,     VALUE_QUEEN,    VALUE_KING
@@ -574,42 +578,69 @@ void findBestMove(BOOL isBlack, PACKED_SQUARE* from, PACKED_SQUARE* to, BOARDPTR
     MOVEINFO moveInfo[MAX_POSSIBLE_MOVES];
     // Get all the moves
     numInfos = getAllMoves(moveInfo, isBlack, FALSE, board);
-    // Evaluate each move (moves that leave us in check remain -EVAL_IN_CHECK)
     for (move = 0; move < numInfos; move++) {
-        BOOL laBlack = isBlack;
-        int laTurn;
+        // Evaluate each move (moves that leave us in check remain -EVAL_IN_CHECK)
         PACKED_SQUARE source = moveInfo[move].source;
         PACKED_SQUARE dest = moveInfo[move].dest;
+        int row = unpackRow(source);
+        int col = unpackCol(source);
+        // Make the move our temporary board
 #ifdef DEBUG_MATES
         printf("Trying "); printMove(source, dest, board); printf("\n");
 #endif
         copyBoard(&tryBoard, board);
-        for (laTurn = lookAhead; laTurn >= 0; laTurn--) {
-            int row = unpackRow(source);
-            int col = unpackCol(source);
-            tryMove(&tryBoard, dest, &tryBoard, row, col);
-            if (inCheck(laBlack, &tryBoard)) {
+        tryMove(&tryBoard, dest, &tryBoard, row, col);
+        if (inCheck(isBlack, &tryBoard)) {
+            // Discard moves that leave us in check
 #ifdef DEBUG_CHECKS
-                printf("Move "); printMove(source, dest, board); printf(" would leave %s in check\n", COLOR_NAME(laBlack));
+            printf("Move "); printMove(source, dest, board); printf(" would leave %s in check\n", COLOR_NAME(isBlack));
 #endif
-                break;
-            }
-            // This move is OK
-            if (laTurn > 0) {
-                // Simple look-ahead - recurse as other side and make best move
+            moveInfo[move].value = VALUE_ILLEGAL;
+            continue;
+        }
+        // Look ahead some number of moves. To simplify, we check only the best known move
+        // for each player. laBlack indicates whether the result is for us or our opponent.
+        // NOTE: If lookAhead is zero, no recursion; this is an important part of the algorithm.
+        PACKED_SQUARE laSource = SQUARE_NONE;
+        PACKED_SQUARE laDest = SQUARE_NONE;
+        BOOL laBlack = isBlack;
+        int laTurn;
+        for (laTurn = lookAhead; laTurn > 0; laTurn--) {
 #ifdef DEBUG_MATES
-                printf("Looking ahead [%d]\n", lookAhead - laTurn + 1);
+            printf("Looking ahead [%d] as %s\n", laTurn, COLOR_NAME(!laBlack));
 #endif
-                laBlack = !laBlack;
-                findBestMove(laBlack, &source, &dest, &tryBoard, laTurn-1);
-                if (source == SQUARE_NONE) break;    // No possible move
-            }
+            laBlack = !laBlack;
+            findBestMove(laBlack, &laSource, &laDest, &tryBoard, laTurn - 1);
+            if (laSource == SQUARE_NONE) break;    // No possible move (stalemate or checkmate)
+            // Put the best available move on the board
+            tryMove(&tryBoard, laDest, &tryBoard, unpackRow(laSource), unpackCol(laSource));
         }
         // tryBoard will have the future state of the board after all lookahead
-        // If opponent is in check, that's good. If we're in check, then the
-        // contemplated move is still valid unless it happened before lookahead
-        if (laTurn == lookAhead && inCheck(isBlack, &tryBoard)) continue;
-        moveInfo[move].value = evaluatePosition(isBlack, &tryBoard);
+        // If opponent is in check, that's good. Mate is even better. Stalemate
+        // Is bad. If we're in check (and this isn't before recursion), then the
+        // contemplated move is still valid but has a bad expected outcome.
+        moveInfo[move].value = 0;
+        BOOL lastIsInCheck = inCheck(laBlack, &tryBoard);
+        if (laSource == SQUARE_NONE) {
+            // No moves; stalemate or checkmate
+            if (lastIsInCheck) {
+                // Checkmate. If it's the opponent, this is a good path; for us, bad
+#ifdef DEBUG_MATES
+                printf("Found checkmate of %s\n", COLOR_NAME(laBlack));
+#endif
+                moveInfo[move].value = (laBlack != isBlack) ? VALUE_CHECKMATE : -VALUE_CHECKMATE;
+            } else {
+                // Stalemate. If it's the opponent, this is a bad path
+#ifdef DEBUG_MATES
+                printf("Found stalemate of %s\n", COLOR_NAME(laBlack));
+#endif
+                if (laBlack != isBlack) moveInfo[move].value = -VALUE_STALEMATE;
+            }
+        } else {
+            // If we're in check after all is said and done, that's a negative
+            // If they're in check after all is said and done, that's a positive
+        }
+        moveInfo[move].value += evaluatePosition(laBlack, &tryBoard) * ((laBlack == isBlack) ? 1 : -1);
 #ifdef DEBUG_CASTLING
         // Test code to always castle when we can
         if (FLAGS(dest) & IS_CASTLE) {
@@ -618,7 +649,7 @@ void findBestMove(BOOL isBlack, PACKED_SQUARE* from, PACKED_SQUARE* to, BOARDPTR
         }
 #endif
 #ifdef DEBUG_PROMOTION
-        // Test code to always castle when we can
+        // Test code to always promote to knight when we can
         if (FLAGS(dest) & IS_KNIGHT_PROMO) {
             printf("Forcing promotion to knight\n");
             moveInfo[move].value = EVAL_FORCE;
@@ -638,15 +669,22 @@ void findBestMove(BOOL isBlack, PACKED_SQUARE* from, PACKED_SQUARE* to, BOARDPTR
 #endif
         // Find the range of moves with the highest result
         int topValue = moveInfo[0].value;
-        int topCount = 0;
-        while ((topCount < numInfos) && (moveInfo[topCount].value == topValue)) ++topCount;
-        // Select randomly from the highest results
-        move = rand() % topCount;
+        if (topValue > VALUE_ILLEGAL) {
+            int topCount = 0;
+            while ((topCount < numInfos) && (moveInfo[topCount].value == topValue)) ++topCount;
+            // Select randomly from the highest results
+            move = rand() % topCount;
 #ifdef DEBUG_MATES
-    printf("Chose #%d of %d best moves.\n", move, topCount);
+            printf("Chose #%d of %d best moves.\n", move, topCount);
 #endif
-        *from = moveInfo[move].source;
-        *to = moveInfo[move].dest;
+            *from = moveInfo[move].source;
+            *to = moveInfo[move].dest;
+        } else {
+#ifdef DEBUG_MATES
+            printf("No legal moves.\n");
+#endif
+            *from = *to = SQUARE_NONE;
+        }
     } else {
 #ifdef DEBUG_MATES
         printf("No valid moves.\n");
