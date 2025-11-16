@@ -42,6 +42,7 @@
 //#define DEBUG_CHECKS
 //#define DEBUG_CASTLING
 //#define DEBUG_PROMOTION
+//#define DEBUG_EVALUATION
 
 //
 // Constants
@@ -49,6 +50,7 @@
 
 // How many (half) moves to look ahead.
 // Some debugging works best with this set to 0
+// Setting it higher than 3 makes the game quite slow
 #define LOOKAHEAD 3
 
 // Additional flags on pieces OR destination squares
@@ -117,6 +119,11 @@ static const PIECE_T pieceValues[] = {
 #define EVAL_FORCE      9999
 #define BARGS           BOARDPTR_T(board), int row, int col
 #define BPARAMS         board, row, col
+
+#define SQUARE_D4       pack(4, 3)
+#define SQUARE_D5       pack(3, 3)
+#define SQUARE_E4       pack(4, 4)
+#define SQUARE_E5       pack(3, 4)
 
 #define SQUARE_NONE    -1
 #define EMPTY_SQUARE    0
@@ -280,6 +287,7 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest
     int checkRow, checkCol;
     int deltaRow, deltaCol, delta;
     BOOL promotion;
+    BOOL pawnCouldMoveForward = FALSE;
     switch (PIECE(myPiece)) {
         // TODO: Test for moves that are illegal due to check
         case    PIECE_PAWN:
@@ -289,6 +297,7 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest
             if (isSquare(board, checkRow, col) && isEmpty(board, checkRow, col)) {
                 // Forward move
                 dests[numDests++] = pack(checkRow, col);
+                pawnCouldMoveForward = TRUE;
             }
             if (isSquare(board, checkRow, col+1) && isEnemy(myPiece, board, checkRow, col+1)) {
                 // Capture toward A
@@ -308,8 +317,8 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest
                 // Capture en passant toward H; sideways capture with extra forward move
                 dests[numDests++] = pack(row, col-1) | IS_EN_PASSANT;
             }
-            // Pawn's first move can be ahead two
-            if (row == (black ? 1 : 6)) {
+            // Pawn's first move can be ahead two if it could have moved ahead one
+            if ((row == (black ? 1 : 6)) && pawnCouldMoveForward) {
                 checkRow += blackSign;
                 if (isEmpty(board, checkRow, col)) {
                     // Forward move two; this makes the pawn vulnerable to en passant capture for ONE MOVE ONLY
@@ -457,30 +466,35 @@ int getAllMoves(MOVEINFO* moveInfo, BOOL isBlack, BOOL noCheckTest, BOARDPTR_T(b
     return numInfos;
 }
 
-BOOL inCheckKnownKingSquare(PACKED_SQUARE kingSquare, BOARDPTR_T(board)) {
-    // Is the specified square, containing a king, in check?
+int countSquareAttackersOfColor(BOOL isBlack, PACKED_SQUARE targetSquare, BOARDPTR_T(board)) {
+    // How many pieces of the specified color are attacking the specified square.
+    // Used for center control, and for check detection
+    int moveCount = 0;
     int move;
-    int ourKing = getSquare(board, unpackRow(kingSquare), unpackCol(kingSquare));
-    BOOL isBlack = IS_BLACK(ourKing);
-    // Find all valid enemy moves (no lookahead)
+    // Find all valid moves for this color (no lookahead)
     MOVEINFO moveInfo[MAX_POSSIBLE_MOVES];
-    int numInfos = getAllMoves(moveInfo, !isBlack, TRUE, board);
-    // See if any enemy move targets the king's square
+    int numInfos = getAllMoves(moveInfo, isBlack, TRUE, board);
+    // See if any move targets the specified square
     for (move = 0; move < numInfos; move++) {
-        if (NO_FLAGS(moveInfo[move].dest) == kingSquare) {
-#if defined(DEBUG_MATES) || defined(DEBUG_CHECKS)
-            printf("\nFound %s in check from ", COLOR_NAME(isBlack));printSquareName(moveInfo[move].source);printf("\n");
+        if (NO_FLAGS(moveInfo[move].dest) == targetSquare) {
+            ++moveCount;
+#if defined(DEBUG_MATES) || defined(DEBUG_CHECKS) || defined(DEBUG_EVALUATION)
+            printf("Found potental %s attack ", COLOR_NAME(isBlack)); printMove(moveInfo[move].source, targetSquare, board);printf("\n");
 #endif
-            return TRUE;
         }
     }
-    return FALSE;
+    return moveCount;
+}
+
+BOOL inCheckKnownKingSquare(PACKED_SQUARE kingSquare, BOARDPTR_T(board)) {
+    // Is the specified square, containing a king, in check?
+    BOOL attackerIsBlack = !IS_BLACK(getSquare(board, unpackRow(kingSquare), unpackCol(kingSquare)));
+    return (countSquareAttackersOfColor(attackerIsBlack, kingSquare, board) > 0);
 }
 
 BOOL inCheck(BOOL isBlack, BOARDPTR_T(board)) {
     // Is the specified color in check?
-    PACKED_SQUARE kingSquare = kingsSquare(isBlack, board);
-    return inCheckKnownKingSquare(kingSquare, board);
+    return inCheckKnownKingSquare(kingsSquare(isBlack, board), board);
 }
 
 int evaluatePosition(BOOL isBlack, BOARDPTR_T(board)) {
@@ -496,6 +510,16 @@ int evaluatePosition(BOOL isBlack, BOARDPTR_T(board)) {
             value += ((isBlack == IS_BLACK(piece)) ? 1 : -1) * pieceValues[pieceType];
         }
     }
+
+    // Check how many of the four center squares d4, d5, e4, e5 we control
+    // NOTE: Weight this carefully against value of material
+    int controlCount = 0;
+    if (countSquareAttackersOfColor(isBlack, SQUARE_D4, board) > 0) ++controlCount;
+    if (countSquareAttackersOfColor(isBlack, SQUARE_D5, board) > 0) ++controlCount;
+    if (countSquareAttackersOfColor(isBlack, SQUARE_E4, board) > 0) ++controlCount;
+    if (countSquareAttackersOfColor(isBlack, SQUARE_E5, board) > 0) ++controlCount;
+    value += controlCount / 2;
+
     return value;
 }
 
