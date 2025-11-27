@@ -141,11 +141,30 @@ static const PIECE_T initial_board[8][8] =
 };
 
 static PIECE_T chessBoard[8][8];
-typedef struct {
-    PACKED_SQUARE source;
-    PACKED_SQUARE dest;
-    int value;
-}   MOVEINFO;
+
+#define PS(sq) (PACKED_SQUARE)( (7 - ((#sq)[1] - '1')) * 8 + ((#sq)[0] - 'a') )
+typedef struct { PACKED_SQUARE source; PACKED_SQUARE dest; int value; } MOVEINFO;
+
+// These are trivial openings, consisting of white and black's first moves
+// WARNING: The OSX command line compiler srand / rand is weak modulo 14 in tests
+typedef struct { const MOVEINFO whiteMove; const MOVEINFO blackMove; const char* const openingName; } OPENING;
+OPENING openings[] = {
+	{{PS(e2), PS(e4), 1}, {PS(e7), PS(e5), 1}, "Ruy Lopez" },
+	{{PS(e2), PS(e4), 1}, {PS(c7), PS(c5), 1}, "Sicilian" },
+	{{PS(e2), PS(e4), 1}, {PS(e7), PS(e6), 1}, "French" },
+	{{PS(e2), PS(e4), 1}, {PS(c7), PS(c6), 1}, "Caro-Kann" },
+	{{PS(d2), PS(d4), 1}, {PS(d7), PS(d5), 1}, "Queen's Gambit" },
+	{{PS(d2), PS(d4), 1}, {PS(g8), PS(f6), 1}, "Indian" },
+	{{PS(c2), PS(c4), 1}, {PS(c7), PS(c5), 1}, "English" },
+	{{PS(c2), PS(c4), 1}, {PS(g8), PS(f6), 1}, "Indian Defense" },
+	{{PS(c2), PS(c4), 1}, {PS(e7), PS(e5), 1}, "Reverse Sicilian" },
+	{{PS(g1), PS(f3), 1}, {PS(d7), PS(d5), 1}, "Queen's Pawn" },
+	{{PS(g1), PS(f3), 1}, {PS(g8), PS(f6), 1}, "Indian Variant 1" },
+	{{PS(g1), PS(f3), 1}, {PS(c7), PS(c5), 1}, "It's Complicated" },
+	{{PS(g1), PS(f3), 1}, {PS(e7), PS(e6), 1}, "French Defense" },
+	{{PS(g1), PS(f3), 1}, {PS(g7), PS(g6), 1}, "Fianchetto" },
+	{{PS(e2), PS(e4), 1}, {PS(e7), PS(e5), 1}, "Ruy Lopez" }
+};
 
 static char* pieceLabels[]  = { " ", "P", "N", "B", "R", "Q", "K", " ",
                                 ".", "p", "n", "b", "r", "q", "k", " " };
@@ -776,6 +795,9 @@ void printBoard(BOARDPTR_T(board)) {
 
 int main() {
     PACKED_SQUARE from = 0, to = 0;
+	// Choose an opening. These are just the first move for white and for black
+	int opening = rand() % (sizeof(openings) / sizeof(OPENING));
+	printf("Chose the '%s' opening...\n", openings[opening].openingName);
     // Set up the initial board
     srand(time(0));
     memcpy(&chessBoard, &initial_board, sizeof(chessBoard));
@@ -784,8 +806,14 @@ int main() {
     // Play until no moves.
     BOOL isBlack = FALSE;
     int move = 1;
+	// Play the game (including the opening)
     while (from != SQUARE_NONE) {
-        findBestMove(isBlack, &from, &to, &chessBoard, LOOKAHEAD);
+		if (move == 1 && opening >= 0) {
+			from = isBlack ? openings[opening].blackMove.source : openings[opening].whiteMove.source;
+			to = isBlack ? openings[opening].blackMove.dest : openings[opening].whiteMove.dest;
+		} else {
+        	findBestMove(isBlack, &from, &to, &chessBoard, LOOKAHEAD);
+		}
         if (from != SQUARE_NONE) {
             eraseBoard();
             // Make the best move
