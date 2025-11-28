@@ -57,3 +57,6 @@ dkms.conf
 # Secrets
 pat.txt
 
+# OS Overhead
+.DS_Store
+
