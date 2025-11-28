@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <memory.h>
 #include <time.h>
+#include <ctype.h>
 
 // Pseudotypes
 #define BOOL int
@@ -142,28 +143,32 @@ static const PIECE_T initial_board[8][8] =
 
 static PIECE_T chessBoard[8][8];
 
-#define PS(sq) (PACKED_SQUARE)( (7 - ((#sq)[1] - '1')) * 8 + ((#sq)[0] - 'a') )
-typedef struct { PACKED_SQUARE source; PACKED_SQUARE dest; int value; } MOVEINFO;
+#define UNPACK_ALGEBRAIC(row, col, p) col = ((p)[0] - 'a'); row = (7 - ((p)[1] - '1'));
+#define PACK_ALGEBRAIC(p) (PACKED_SQUARE)( (7 - ((p)[1] - '1')) * 8 + ((p)[0] - 'a') )
+#define PS(sq) PACK_ALGEBRAIC(#sq)
 
 // These are trivial openings, consisting of white and black's first moves
+typedef struct { PACKED_SQUARE source; PACKED_SQUARE dest; int value; } MOVEINFO;
 typedef struct { const MOVEINFO whiteMove; const MOVEINFO blackMove; const char* const openingName; } OPENING;
 OPENING openings[] = {
-	{{PS(e2), PS(e4), 1}, {PS(e7), PS(e5), 1}, "Ruy Lopez" },
-	{{PS(e2), PS(e4), 1}, {PS(c7), PS(c5), 1}, "Sicilian" },
-	{{PS(e2), PS(e4), 1}, {PS(e7), PS(e6), 1}, "French" },
-	{{PS(e2), PS(e4), 1}, {PS(c7), PS(c6), 1}, "Caro-Kann" },
-	{{PS(d2), PS(d4), 1}, {PS(d7), PS(d5), 1}, "Queen's Gambit" },
-	{{PS(d2), PS(d4), 1}, {PS(g8), PS(f6), 1}, "Indian" },
-	{{PS(d2), PS(d4), 1}, {PS(e7), PS(e6), 1}, "Horowitz" },
-	{{PS(c2), PS(c4), 1}, {PS(c7), PS(c5), 1}, "English" },
-	{{PS(c2), PS(c4), 1}, {PS(g8), PS(f6), 1}, "Indian Defense" },
-	{{PS(c2), PS(c4), 1}, {PS(e7), PS(e5), 1}, "Reverse Sicilian" },
-	{{PS(g1), PS(f3), 1}, {PS(d7), PS(d5), 1}, "Queen's Pawn" },
-	{{PS(g1), PS(f3), 1}, {PS(g8), PS(f6), 1}, "Indian Variant 1" },
-	{{PS(g1), PS(f3), 1}, {PS(c7), PS(c5), 1}, "It's Complicated" },
-	{{PS(g1), PS(f3), 1}, {PS(e7), PS(e6), 1}, "French Defense" },
-	{{PS(g1), PS(f3), 1}, {PS(g7), PS(g6), 1}, "Fianchetto" }
+    { {PS(e2), PS(e4), 1}, {PS(e7), PS(e5), 1}, "Ruy Lopez" },
+    { {PS(e2), PS(e4), 1}, {PS(c7), PS(c5), 1}, "Sicilian" },
+    { {PS(e2), PS(e4), 1}, {PS(e7), PS(e6), 1}, "French" },
+    { {PS(e2), PS(e4), 1}, {PS(c7), PS(c6), 1}, "Caro-Kann" },
+    { {PS(d2), PS(d4), 1}, {PS(d7), PS(d5), 1}, "Queen's Gambit" },
+    { {PS(d2), PS(d4), 1}, {PS(g8), PS(f6), 1}, "Indian" },
+    { {PS(d2), PS(d4), 1}, {PS(e7), PS(e6), 1}, "Horowitz" },
+    { {PS(c2), PS(c4), 1}, {PS(c7), PS(c5), 1}, "English" },
+    { {PS(c2), PS(c4), 1}, {PS(g8), PS(f6), 1}, "Indian Defense" },
+    { {PS(c2), PS(c4), 1}, {PS(e7), PS(e5), 1}, "Reverse Sicilian" },
+    { {PS(g1), PS(f3), 1}, {PS(d7), PS(d5), 1}, "Queen's Pawn" },
+    { {PS(g1), PS(f3), 1}, {PS(g8), PS(f6), 1}, "Indian Variant 1" },
+    { {PS(g1), PS(f3), 1}, {PS(c7), PS(c5), 1}, "It's Complicated" },
+    { {PS(g1), PS(f3), 1}, {PS(e7), PS(e6), 1}, "French Defense" },
+    { {PS(g1), PS(f3), 1}, {PS(g7), PS(g6), 1}, "Fianchetto" }
 };
+
+typedef struct { int toMove; int halfMoves; int moveNumber;} FENSTATS;
 
 static char* pieceLabels[]  = { " ", "P", "N", "B", "R", "Q", "K", " ",
                                 ".", "p", "n", "b", "r", "q", "k", " " };
@@ -178,7 +183,7 @@ static char** pieceSymbols = &pieceLabels[0];
 BOOL inCheck(BOOL isBlack, BOARDPTR_T(board));
 BOOL inCheckKnownKingSquare(PACKED_SQUARE kingSquare, BOARDPTR_T(board));
 void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS);
-static int ruleOf75 = 0;
+static int ruleOf50 = 0;
 
 //
 // Basic square operations
@@ -264,7 +269,7 @@ void printMove(PACKED_SQUARE source, PACKED_SQUARE dest, BOARDPTR_T(board)) {
     if (dest & IS_CASTLE) {
         if (unpackCol(dest) < 4) printf("O-O-O");
         else printf("O-O");
-	}
+    }
     else {
         printf("%s", pieceLabels[PIECE(attacker)]);
         printSquareName(source);
@@ -547,6 +552,65 @@ void copyBoard(BOARDPTR_T(board), BOARDPTR_T(tryBoard))
     memcpy(board, tryBoard, sizeof(*tryBoard));
 }
 
+// Parse starting position from Forsyth-Edwards notation
+// Spaces required between fields. Missing fields get reasonable defaults
+void parseFENString(BOARDPTR_T(board), FENSTATS *stats, char* position) {
+    int row = 0, col = 0;
+    char c = 0;
+    memset(stats, 0, sizeof(*stats));  // White to move by default
+    // Board position
+    memset(board, EMPTY_SQUARE, sizeof(*board));
+    for (row = 0; row < 8; row++) {
+        col = 0;
+        while ((c = *position++) && c != '/' && c != ' ' && col < 8) {
+            if (isdigit(c)) col += (c-'0');
+            else {
+                int black = islower(c);
+                switch (tolower(c)) {
+                case 'p': (*board)[row][col++] = 1 | COLOR_FLAG(black); break;
+                case 'n': (*board)[row][col++] = 2 | COLOR_FLAG(black); break;
+                case 'b': (*board)[row][col++] = 3 | COLOR_FLAG(black); break;
+                case 'r': (*board)[row][col++] = 4 | COLOR_FLAG(black); break;
+                case 'q': (*board)[row][col++] = 5 | COLOR_FLAG(black); break;
+                case 'k': (*board)[row][col++] = 6 | COLOR_FLAG(black); break;
+                default: break;
+                }
+            }
+        }
+        if (!c) break;
+	}
+    // Which side to move
+    if (c == ' ') { c = *position++; stats->toMove = (c == 'b'); if (c) c = *position++; }
+    // Who can castle. We save this on the rooks
+    if (c == ' ') {
+        int wck = 0, wcq = 0, bck = 0, bcq = 0;
+        while ((c = *position++) && c != ' ') {
+            if (c == 'K') wck = 1;
+            else if (c == 'Q') wcq = 1;
+            else if (c == 'k') bck = 1;
+            else if (c == 'q') bcq = 1;
+        }
+        if (!wcq && (*board)[7][0] == WHITE_ROOK) (*board)[7][0] |= CANNOT_CASTLE;
+        if (!wck && (*board)[7][7] == WHITE_ROOK) (*board)[7][7] |= CANNOT_CASTLE;
+        if (!bcq && (*board)[0][0] == BLACK_ROOK) (*board)[0][0] |= CANNOT_CASTLE;
+        if (!bck && (*board)[0][7] == BLACK_ROOK) (*board)[0][7] |= CANNOT_CASTLE;
+    }
+    // en passant targets (which are one square behind the pawn)
+    if (c == ' ') {
+        if (*position != '-') {
+            char c1;
+            while ((c1 = *position++) && c1 != ' ' && (c = *position++) && c != ' ') {
+                char pos[2] = { c1, c };
+                UNPACK_ALGEBRAIC(row, col, pos);
+                row += ADVANCE_DIRECTION(row == 2);
+                if (((*board)[row][col] & ~COLOR_BLACK) == PIECE_PAWN) (*board)[row][col] |= CAN_EN_PASSANT;
+            }
+        } else { position++; c = *position++; }
+    }
+    // Half move clock and move number
+    sscanf(position, " %d %d", &stats->halfMoves, &stats->moveNumber);
+}
+
 void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS) {
     // Tries moving the piece at row, col to dest
     // Copy active board to try board
@@ -557,7 +621,6 @@ void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS) {
     BOOL black = IS_BLACK(piece);
     int destCol = unpackCol(dest);
     int destRow = unpackRow(dest);
-    int oldPiece = getSquare(newBoard, destRow, destCol);
     // Simplified pawn promotion to a queen or a knight
     // This leaves out some edge cases where a rook or bishop is preferable to a queen to avoid stalemate
     if (piece == WHITE_PAWN && destRow == 0) piece = FLAGS(dest & IS_KNIGHT_PROMO) ? WHITE_KNIGHT : WHITE_QUEEN;
@@ -775,9 +838,9 @@ void printBoard(BOARDPTR_T(board)) {
             char* columnSpacerLeft = isBlackSquare ? COLUMN_SPACER_BLACK_LEFT : COLUMN_SPACER_WHITE_LEFT;
             char* columnSpacerRight = isBlackSquare ? COLUMN_SPACER_BLACK_RIGHT : COLUMN_SPACER_WHITE_RIGHT;
             if (isBlackSquare) {
-                printf("\e[42m%s%s%s\e[0m", columnSpacerLeft, pieceSymbols[piece], columnSpacerRight);
+                printf("\e[42;30m%s%s%s\e[0m", columnSpacerLeft, pieceSymbols[piece], columnSpacerRight);
             } else {
-                printf("\e[47m%s%s%s\e[0m", columnSpacerLeft, pieceSymbols[piece], columnSpacerRight);
+                printf("\e[47;30m%s%s%s\e[0m", columnSpacerLeft, pieceSymbols[piece], columnSpacerRight);
             }
 #else
             if (isBlackSquare)
@@ -792,27 +855,37 @@ void printBoard(BOARDPTR_T(board)) {
     printf("\n");
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    int move = 1;
+    BOOL isBlack = FALSE;
+    int opening = -1;
     srand(time(0));
-    PACKED_SQUARE from = 0, to = 0;
-	// Choose an opening. These are just the first move for white and for black
-	int opening = rand() % (sizeof(openings) / sizeof(OPENING));
-	printf("Chose the '%s' opening...\n", openings[opening].openingName);
-    // Set up the initial board
-    memcpy(&chessBoard, &initial_board, sizeof(chessBoard));
+    if (argc > 2 && !strcmp(argv[1], "-p")) {
+        // Parse opening position into initial board
+        FENSTATS stats;
+        parseFENString(&chessBoard, &stats, argv[2]);
+        isBlack = stats.toMove;
+        move = stats.moveNumber;
+        ruleOf50 = stats.halfMoves * 2;
+        printf("Loaded a position from the command line...\n");
+    } else {
+        // Set up the initial board
+        memcpy(&chessBoard, &initial_board, sizeof(chessBoard));
+        // Choose an opening. These are just the first move for white and for black
+        opening = rand() % (sizeof(openings) / sizeof(OPENING));
+        printf("Chose the '%s' opening...\n", openings[opening].openingName);
+    }
     eraseBoard();
     printf("\n\n"); printBoard(&chessBoard);
     // Play until no moves.
-    BOOL isBlack = FALSE;
-    int move = 1;
-	// Play the game (including the opening)
+    PACKED_SQUARE from = 0, to = 0;
     while (from != SQUARE_NONE) {
-		if (move == 1 && opening >= 0) {
-			from = isBlack ? openings[opening].blackMove.source : openings[opening].whiteMove.source;
-			to = isBlack ? openings[opening].blackMove.dest : openings[opening].whiteMove.dest;
-		} else {
-        	findBestMove(isBlack, &from, &to, &chessBoard, LOOKAHEAD);
-		}
+        if (move == 1 && opening >= 0) {
+            from = isBlack ? openings[opening].blackMove.source : openings[opening].whiteMove.source;
+            to = isBlack ? openings[opening].blackMove.dest : openings[opening].whiteMove.dest;
+        } else {
+            findBestMove(isBlack, &from, &to, &chessBoard, LOOKAHEAD);
+        }
         if (from != SQUARE_NONE) {
             eraseBoard();
             // Make the best move
@@ -825,11 +898,11 @@ int main() {
             printBoard(&chessBoard);
             // Draw detection
             if (target != EMPTY_SQUARE || PIECE(attacker) == PIECE_PAWN) {
-                // Reset 75 move draw
-                ruleOf75 = 0;
+                // Reset 50 move draw
+                ruleOf50 = 0;
             } else {
-                ++ruleOf75;
-                if (ruleOf75 == 150) {
+                ++ruleOf50;
+                if (ruleOf50 == 100) {
                     // If checkmate, game over as checkmate
                     // Otherwise, game over as draw. For now,
                     // no need to distinguish.
