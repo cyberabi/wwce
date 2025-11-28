@@ -3,7 +3,7 @@ World's Worst Chess Engine
 
 I challenged myself to write a rudimenatary chess engine in four hours. That initial challenge was a qualified success, and you can find it on the main branch.
 
-Here on the bugfixes branch I'm making small improvements and bug fixes based on that initial four hour work. The resulting executable is under 1000 lines of code including comments, and under 64K compiled (on a Macbook). Despite its small size wwce can load a starting position from a FEN string (-p <string> on the command line), to solve chess puzzles; it also implements a trivial opening book of one move each for white and black.
+Here on the bugfixes branch I'm making small improvements and bug fixes based on that initial four hour work. The resulting executable is under 1000 lines of code including comments, and under 64K compiled (on a Macbook). Despite its small size wwce can load a starting position from a FEN string (-fen <string> on the command line), to solve chess puzzles; it also implements a trivial opening book of one move each for white and black.
 
 Currently not implemented:
 1) Human player input (plays only with itself)

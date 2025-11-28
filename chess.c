@@ -128,20 +128,12 @@ static const PIECE_T pieceValues[] = {
 
 #define SQUARE_NONE    -1
 #define EMPTY_SQUARE    0
-// NOTE: with this initialization, array row "0" is chess rank 8; array column 0 is chess file a
-static const PIECE_T initial_board[8][8] =
-{
-    BLACK_ROOK,     BLACK_KNIGHT,   BLACK_BISHOP,   BLACK_QUEEN,    BLACK_KING,     BLACK_BISHOP,   BLACK_KNIGHT,   BLACK_ROOK,
-    BLACK_PAWN,     BLACK_PAWN,     BLACK_PAWN,     BLACK_PAWN,     BLACK_PAWN,     BLACK_PAWN,     BLACK_PAWN,     BLACK_PAWN,
-    EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,
-    EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,
-    EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,
-    EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,   EMPTY_SQUARE,
-    WHITE_PAWN,     WHITE_PAWN,     WHITE_PAWN,     WHITE_PAWN,     WHITE_PAWN,     WHITE_PAWN,     WHITE_PAWN,     WHITE_PAWN,
-    WHITE_ROOK,     WHITE_KNIGHT,   WHITE_BISHOP,   WHITE_QUEEN,    WHITE_KING,     WHITE_BISHOP,   WHITE_KNIGHT,   WHITE_ROOK
-};
 
 static PIECE_T chessBoard[8][8];
+
+// NOTE: For FEN strings, and in our internal representation, board row "0" is chess rank 8; array column 0 is chess file a
+static const char* startingPositon = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+typedef struct { int toMove; int halfMoves; int moveNumber;} FENSTATS;
 
 #define UNPACK_ALGEBRAIC(row, col, p) col = ((p)[0] - 'a'); row = (7 - ((p)[1] - '1'));
 #define PACK_ALGEBRAIC(p) (PACKED_SQUARE)( (7 - ((p)[1] - '1')) * 8 + ((p)[0] - 'a') )
@@ -168,8 +160,6 @@ OPENING openings[] = {
     { {PS(g1), PS(f3), 1}, {PS(g7), PS(g6), 1}, "Fianchetto" }
 };
 
-typedef struct { int toMove; int halfMoves; int moveNumber;} FENSTATS;
-
 static char* pieceLabels[]  = { " ", "P", "N", "B", "R", "Q", "K", " ",
                                 ".", "p", "n", "b", "r", "q", "k", " " };
 
@@ -183,7 +173,6 @@ static char** pieceSymbols = &pieceLabels[0];
 BOOL inCheck(BOOL isBlack, BOARDPTR_T(board));
 BOOL inCheckKnownKingSquare(PACKED_SQUARE kingSquare, BOARDPTR_T(board));
 void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS);
-static int ruleOf50 = 0;
 
 //
 // Basic square operations
@@ -245,7 +234,7 @@ void printSquareName(PACKED_SQUARE square) {
 }
 
 // Screen clear
-void eraseBoard() {
+void eraseBoard(void) {
 #ifdef DONT_SCROLL
 #ifdef USE_ESCAPE_CODES
     // VT100
@@ -554,10 +543,10 @@ void copyBoard(BOARDPTR_T(board), BOARDPTR_T(tryBoard))
 
 // Parse starting position from Forsyth-Edwards notation
 // Spaces required between fields. Missing fields get reasonable defaults
-void parseFENString(BOARDPTR_T(board), FENSTATS *stats, char* position) {
+void parseFENString(BOARDPTR_T(board), FENSTATS *stats, const char* position) {
     int row = 0, col = 0;
     char c = 0;
-    memset(stats, 0, sizeof(*stats));  // White to move by default
+    { stats->toMove = COLOR_WHITE; stats->halfMoves = 0; stats->moveNumber = 1; }
     // Board position
     memset(board, EMPTY_SQUARE, sizeof(*board));
     for (row = 0; row < 8; row++) {
@@ -826,7 +815,7 @@ void printWhiteSpaced(char* text) {
 }
 
 void printBoard(BOARDPTR_T(board)) {
-    int row, col, piece, pieceType, pieceColor;
+    int row, col, piece;
     for (row = 0; row <= 7; row++) {
         printf("\n%d|", (7 - row) + 1);
         for (col = 0; col <= 7; col++) {
@@ -856,67 +845,59 @@ void printBoard(BOARDPTR_T(board)) {
 }
 
 int main(int argc, char* argv[]) {
-    int move = 1;
-    BOOL isBlack = FALSE;
-    int opening = -1;
-    srand(time(0));
-    if (argc > 2 && !strcmp(argv[1], "-p")) {
-        // Parse opening position into initial board
-        FENSTATS stats;
-        parseFENString(&chessBoard, &stats, argv[2]);
-        isBlack = stats.toMove;
-        move = stats.moveNumber;
-        ruleOf50 = stats.halfMoves * 2;
-        printf("Loaded a position from the command line...\n");
-    } else {
-        // Set up the initial board
-        memcpy(&chessBoard, &initial_board, sizeof(chessBoard));
-        // Choose an opening. These are just the first move for white and for black
-        opening = rand() % (sizeof(openings) / sizeof(OPENING));
-        printf("Chose the '%s' opening...\n", openings[opening].openingName);
-    }
+    srand((int)time(0));
+
+    const char* position = startingPositon;
+    int opening = rand() % (sizeof(openings) / sizeof(OPENING));
+    FENSTATS stats;
+
+    if (argc > 2 && !strcmp(argv[1], "-fen")) { position = argv[2]; opening = -1; }
+    else if (argc > 1 && !strcmp(argv[1], "-startpos")) {/* use default start position and opening */}
+    parseFENString(&chessBoard, &stats, position);
+    if (opening != -1) printf("Chose the '%s' opening...\n", openings[opening].openingName);
+
     eraseBoard();
     printf("\n\n"); printBoard(&chessBoard);
+
     // Play until no moves.
     PACKED_SQUARE from = 0, to = 0;
     while (from != SQUARE_NONE) {
-        if (move == 1 && opening >= 0) {
-            from = isBlack ? openings[opening].blackMove.source : openings[opening].whiteMove.source;
-            to = isBlack ? openings[opening].blackMove.dest : openings[opening].whiteMove.dest;
+        if (stats.moveNumber == 1 && opening >= 0) {
+            from = stats.toMove ? openings[opening].blackMove.source : openings[opening].whiteMove.source;
+            to = stats.toMove ? openings[opening].blackMove.dest : openings[opening].whiteMove.dest;
         } else {
-            findBestMove(isBlack, &from, &to, &chessBoard, LOOKAHEAD);
+            findBestMove(stats.toMove, &from, &to, &chessBoard, LOOKAHEAD);
         }
         if (from != SQUARE_NONE) {
             eraseBoard();
             // Make the best move
             int attacker = getSquare(&chessBoard, unpackRow(from), unpackCol(from));
             int target = getSquare(&chessBoard, unpackRow(to), unpackCol(to));
-            printf("\n%3d. ", move);
-            if (isBlack) printf("          ");
+            printf("\n%3d. ", stats.moveNumber);
+            if (stats.toMove) printf("          ");
             printMove(from, to, &chessBoard); printf("\n");
             tryMove(&chessBoard, to, &chessBoard, unpackRow(from), unpackCol(from));
             printBoard(&chessBoard);
             // Draw detection
             if (target != EMPTY_SQUARE || PIECE(attacker) == PIECE_PAWN) {
                 // Reset 50 move draw
-                ruleOf50 = 0;
+                stats.halfMoves = 0;
             } else {
-                ++ruleOf50;
-                if (ruleOf50 == 100) {
+                if (++stats.halfMoves >= 100) {
                     // If checkmate, game over as checkmate
                     // Otherwise, game over as draw. For now,
                     // no need to distinguish.
-                    printf("Invoking 75 move rule.\n");
+                    printf("Invoking 50 move rule.\n");
                     break;
                 }
             }
             // Switch sides
-            isBlack = !isBlack;
-            if (!isBlack) ++move;
+            stats.toMove = !stats.toMove;
+            if (!stats.toMove) ++stats.moveNumber;
         }
     }
     if (from == SQUARE_NONE) {
-        printf(inCheck(isBlack, &chessBoard) ? "Checkmate.\n" : "Stalemate.\n");
+        printf(inCheck(stats.toMove, &chessBoard) ? "Checkmate.\n" : "Stalemate.\n");
     }
     printf("Game over.\n");
     return 0;
