@@ -57,14 +57,19 @@
 // Additional flags on pieces OR destination squares
 // to indicate that they're vulnerable to en passant,
 // ineligible to castle, or promoting to a different piece.
-#define CAN_EN_PASSANT  (1<<8)
-#define IS_EN_PASSANT   (1<<9)
-#define CANNOT_CASTLE   (1<<10)
-#define IS_CASTLE       (1<<11)
-#define IS_KNIGHT_PROMO (1<<12)
+
 #define FLAGS_START     (1<<8)
 #define NO_FLAGS(x)     ((x) % FLAGS_START)
 #define FLAGS(x)        ((x) - NO_FLAGS(x))
+
+// On a piece
+#define CAN_EN_PASSANT  (1<<8)
+#define CAN_CASTLE      (1<<9)
+
+// On a destination
+#define IS_EN_PASSANT   (1<<10)
+#define IS_CASTLE       (1<<11)
+#define IS_KNIGHT_PROMO (1<<12)
 
 // Color Bias
 #define COLOR_WHITE     0
@@ -384,8 +389,8 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest
                         checkRow = row + deltaRow * delta;
                         checkCol = col + deltaCol * delta;
                         if (!isValid(myPiece, board, checkRow, checkCol)) break;
-                        // Empty or capture; once moved, a rook cannot castle
-                        dests[numDests++] = pack(checkRow, checkCol) | CANNOT_CASTLE;
+                        // Empty or capture; movement loses CAN_CASTLE
+                        dests[numDests++] = pack(checkRow, checkCol);
                         if (!isEmpty(board, checkRow, checkCol)) break;
                         ++delta;
                     }
@@ -406,25 +411,26 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest
                     checkCol = col + deltaCol;
                     // Note: isValid() does not test for check
                     if (isValid(myPiece, board, checkRow, checkCol)) {
-                        // Empty or capture; once moved, a king cannot castle
-                        dests[numDests++] = pack(checkRow, checkCol) | CANNOT_CASTLE;
+                        // Empty or capture; movement loses CAN_CASTLE
+                        dests[numDests++] = pack(checkRow, checkCol);
                     }
                 }
             }
             // Castling
+            // Valid only if the corresponding rook has the flag
             // NOTE: noCheckTest prevents infinite recursion when evaluating legal moves and check
-            PIECE_T king = getSquareWithFlags(board, row, col);
-            if (!(FLAGS(king) & CANNOT_CASTLE) && (noCheckTest || !inCheck(black, board))) {
+            if (noCheckTest || !inCheck(black, board)) {
                 for (int kingSide = 0; kingSide <= 1; kingSide++) {
                     int rookCol = kingSide * 7;
                     int moveSign = -1 + (2 * kingSide);
                     int checkCol = col + (2 * moveSign);
                     PIECE_T rook = getSquareWithFlags(board, row, rookCol);
-                    if ((PIECE(rook) == PIECE_ROOK) && !(FLAGS(rook) & CANNOT_CASTLE) &&
+                    if ((PIECE(rook) == PIECE_ROOK) && (FLAGS(rook) & CAN_CASTLE) &&
                         isEmpty(board, row, col + moveSign) && isEmpty(board, row, checkCol) &&
                         (kingSide || isEmpty(board, row, checkCol + moveSign))) {
                         // Legal to castle on this side (unless moving through or into check)
                         // findBestMove will handle the case where we end up in check, but test the first square
+                        PIECE_T king = getSquareWithFlags(board, row, col);
                         BOOL isInCheck;
                         (*board)[row][col] = EMPTY_SQUARE;
                         (*board)[row][col + moveSign] = king;
@@ -437,7 +443,7 @@ int getValidMovesAsPiece(PACKED_SQUARE* dests, PIECE_T asPiece, BOOL noCheckTest
 #ifdef DEBUG_CASTLING
                             printf("\n%s can try to castle %sside\n", COLOR_NAME(black), kingSide ? "king" : "queen");
 #endif
-                            dests[numDests++] = pack(row, checkCol) | (CANNOT_CASTLE | IS_CASTLE);
+                            dests[numDests++] = pack(row, checkCol) | IS_CASTLE;
                         }
                     }
                 }
@@ -573,19 +579,14 @@ void parseFENString(BOARDPTR_T(board), FENSTATS *stats, const char* position) {
 	}
     // Which side to move
     if (c == ' ') { c = *position++; stats->toMove = (c == 'b'); if (c) c = *position++; }
-    // Who can castle. We save this on the rooks
+    // Who can castle. We save this on the rooks ONLY, but have to update them if king moves.
     if (c == ' ') {
-        int wck = 0, wcq = 0, bck = 0, bcq = 0;
         while ((c = *position++) && c != ' ') {
-            if (c == 'K') wck = 1;
-            else if (c == 'Q') wcq = 1;
-            else if (c == 'k') bck = 1;
-            else if (c == 'q') bcq = 1;
+            if      (c == 'K' && (*board)[7][7] == WHITE_ROOK) (*board)[7][7] |= CAN_CASTLE;
+            else if (c == 'Q' && (*board)[7][0] == WHITE_ROOK) (*board)[7][0] |= CAN_CASTLE;
+            else if (c == 'k' && (*board)[0][7] == BLACK_ROOK) (*board)[0][7] |= CAN_CASTLE;
+            else if (c == 'q' && (*board)[0][0] == BLACK_ROOK) (*board)[0][0] |= CAN_CASTLE;
         }
-        if (!wcq && (*board)[7][0] == WHITE_ROOK) (*board)[7][0] |= CANNOT_CASTLE;
-        if (!wck && (*board)[7][7] == WHITE_ROOK) (*board)[7][7] |= CANNOT_CASTLE;
-        if (!bcq && (*board)[0][0] == BLACK_ROOK) (*board)[0][0] |= CANNOT_CASTLE;
-        if (!bck && (*board)[0][7] == BLACK_ROOK) (*board)[0][7] |= CANNOT_CASTLE;
     }
     // en passant targets (which are one square behind the pawn)
     if (c == ' ') {
@@ -613,11 +614,18 @@ void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS) {
     BOOL black = IS_BLACK(piece);
     int destCol = unpackCol(dest);
     int destRow = unpackRow(dest);
+#ifdef DEBUG_CHECKS
+    PIECE_T oldPiece = getSquare(board, destRow, destCol);
+    if (oldPiece == BLACK_KING || oldPiece == WHITE_KING) {
+        printf("\nFATAL: Captured king at ");printSquareName(dest);printf("\n");
+        exit(0);    // For breakpoint
+    }
+#endif
+    (*newBoard)[row][col] = EMPTY_SQUARE;
     // Simplified pawn promotion to a queen or a knight
     // This leaves out some edge cases where a rook or bishop is preferable to a queen to avoid stalemate
     if (piece == WHITE_PAWN && destRow == 0) piece = FLAGS(dest & IS_KNIGHT_PROMO) ? WHITE_KNIGHT : WHITE_QUEEN;
     if (piece == BLACK_PAWN && destRow == 7) piece = FLAGS(dest & IS_KNIGHT_PROMO) ? BLACK_KNIGHT : BLACK_QUEEN;
-    (*newBoard)[row][col] = EMPTY_SQUARE;
     if (FLAGS(dest) & IS_EN_PASSANT) {
         // en passant capture removes the piece with CAN_EN_PASSANT from the board
         int blackSign = ADVANCE_DIRECTION(black);
@@ -628,36 +636,38 @@ void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS) {
         printf(" trying en passant capture at "); printSquareName(dest); printf("\n");
 #endif
     } else {
-        // If there's a CAN_EN_PASSANT flag or a CANNOT_CASTLE flag on the DESTINATION, copy to PIECE
-        (*newBoard)[destRow][destCol] = piece | (FLAGS(dest) & (CAN_EN_PASSANT | CANNOT_CASTLE));
+        // If there's a CAN_EN_PASSANT flag on the DESTINATION, copy to PIECE
+        (*newBoard)[destRow][destCol] = piece | (FLAGS(dest) & CAN_EN_PASSANT);
 #ifdef DEBUG_EN_PASSANT
         if (FLAGS(dest) & CAN_EN_PASSANT) {
             printf("Pawn moving to "); printSquareName(dest); printf(" is vulnerable to en passant.\n");
         }
 #endif
         if (FLAGS(dest) & IS_CASTLE) {
-            // Castling moves two pieces. Only the king move is packed, so we also have to move the rook.
+            // Castling moves two pieces. Only the king move is packed, so we also have to move the rook and clear the rook flags.
             BOOL queenSide = (destCol < 4);
 #ifdef DEBUG_CASTLING
             printf("Trying to castle to "); printSquareName(dest); printf("\n");
 #endif
             if (queenSide) {
-                // Queenside
-                (*newBoard)[destRow][3] = (*newBoard)[destRow][0] | CANNOT_CASTLE;
+                // Queenside. Move the rook, and clear the rook's castling flag
+                (*newBoard)[destRow][3] = (*newBoard)[destRow][0] & ~CAN_CASTLE;
                 (*newBoard)[destRow][0] = EMPTY_SQUARE;
             } else {
-                // Kingside
-                (*newBoard)[destRow][5] = (*newBoard)[destRow][7] | CANNOT_CASTLE;
+                // Kingside. Move the rook, and clear the rook's castling flag
+                (*newBoard)[destRow][5] = (*newBoard)[destRow][7] & ~CAN_CASTLE;
                 (*newBoard)[destRow][7] = EMPTY_SQUARE;
             }
         }
+        BOOL invalidateCastling = (piece == BLACK_KING || piece == WHITE_KING);
+        if (invalidateCastling) {
+            // Whether the default rook squares are empty or not, rooks or not, right color or not,
+            // all we are doing is clearing a flag that only rooks care about and even rooks of the
+            // wrong color on our rank shouldn't have the flag! Rook move already clears that rook.
+            (*newBoard)[7 * !black][7] &= ~CAN_CASTLE;
+            (*newBoard)[7 * !black][0] &= ~CAN_CASTLE;
+        }
     }
-#ifdef DEBUG_CHECKS
-    if (oldPiece == BLACK_KING || oldPiece == WHITE_KING) {
-        printf("\nFATAL: Captured king at ");printSquareName(dest);printf("\n");
-        exit(0);    // For breakpoint
-    }
-#endif
 }
 
 int evalSort(const void* p1, const void* p2) {
