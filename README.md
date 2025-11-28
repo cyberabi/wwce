@@ -12,11 +12,11 @@ Currently not implemented:
 Changes that would make it a better engine:
 1) Deeper understanding of openings
 2) Understanding of end game
-3) Better position evaluation (currently avoids check and stalemate, seeks checkmate, and min-maxes the point value of pieces remaining on the board)
+3) Better position evaluation (currently avoids check and stalemate, seeks checkmate, values center control, and min-maxes the point value of pieces remaining on the board)
 4) Saving the transcript of a game
 
 Known bugs:
-1) Missing algebraic notation for checkmate and stalemate
+1) Missing algebraic notation for stalemate
 
 Don't code like this. MIT License. Have fun!
 

@@ -173,6 +173,7 @@ static char** pieceSymbols = &pieceLabels[0];
 BOOL inCheck(BOOL isBlack, BOARDPTR_T(board));
 BOOL inCheckKnownKingSquare(PACKED_SQUARE kingSquare, BOARDPTR_T(board));
 void tryMove(BOARDPTR_T(newBoard), PACKED_SQUARE dest, BARGS);
+void findBestMove(BOOL isBlack, PACKED_SQUARE* from, PACKED_SQUARE* to, BOARDPTR_T(board), int lookAhead);
 
 //
 // Basic square operations
@@ -277,11 +278,13 @@ void printMove(PACKED_SQUARE source, PACKED_SQUARE dest, BOARDPTR_T(board)) {
             }
         }
     }
-    // Test for check
+    // Test for check and checkmate
     tryMove(&tryBoard, dest, board, sourceRow, sourceCol);
     if (inCheck(!IS_BLACK(attacker), &tryBoard)) {
         //  Check!
-        printf("+");
+        int from, to;
+        findBestMove(!IS_BLACK(attacker), &from, &to, &tryBoard, 0);
+        printf((from == SQUARE_NONE) ? "#" : "+");
     }
 }
 
@@ -863,6 +866,7 @@ int main(int argc, char* argv[]) {
     PACKED_SQUARE from = 0, to = 0;
     while (from != SQUARE_NONE) {
         if (stats.moveNumber == 1 && opening >= 0) {
+            // Play from the opening book
             from = stats.toMove ? openings[opening].blackMove.source : openings[opening].whiteMove.source;
             to = stats.toMove ? openings[opening].blackMove.dest : openings[opening].whiteMove.dest;
         } else {
