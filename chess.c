@@ -146,7 +146,6 @@ static PIECE_T chessBoard[8][8];
 typedef struct { PACKED_SQUARE source; PACKED_SQUARE dest; int value; } MOVEINFO;
 
 // These are trivial openings, consisting of white and black's first moves
-// WARNING: The OSX command line compiler srand / rand is weak modulo 14 in tests
 typedef struct { const MOVEINFO whiteMove; const MOVEINFO blackMove; const char* const openingName; } OPENING;
 OPENING openings[] = {
 	{{PS(e2), PS(e4), 1}, {PS(e7), PS(e5), 1}, "Ruy Lopez" },
@@ -155,6 +154,7 @@ OPENING openings[] = {
 	{{PS(e2), PS(e4), 1}, {PS(c7), PS(c6), 1}, "Caro-Kann" },
 	{{PS(d2), PS(d4), 1}, {PS(d7), PS(d5), 1}, "Queen's Gambit" },
 	{{PS(d2), PS(d4), 1}, {PS(g8), PS(f6), 1}, "Indian" },
+	{{PS(d2), PS(d4), 1}, {PS(e7), PS(e6), 1}, "Horowitz" },
 	{{PS(c2), PS(c4), 1}, {PS(c7), PS(c5), 1}, "English" },
 	{{PS(c2), PS(c4), 1}, {PS(g8), PS(f6), 1}, "Indian Defense" },
 	{{PS(c2), PS(c4), 1}, {PS(e7), PS(e5), 1}, "Reverse Sicilian" },
@@ -162,8 +162,7 @@ OPENING openings[] = {
 	{{PS(g1), PS(f3), 1}, {PS(g8), PS(f6), 1}, "Indian Variant 1" },
 	{{PS(g1), PS(f3), 1}, {PS(c7), PS(c5), 1}, "It's Complicated" },
 	{{PS(g1), PS(f3), 1}, {PS(e7), PS(e6), 1}, "French Defense" },
-	{{PS(g1), PS(f3), 1}, {PS(g7), PS(g6), 1}, "Fianchetto" },
-	{{PS(e2), PS(e4), 1}, {PS(e7), PS(e5), 1}, "Ruy Lopez" }
+	{{PS(g1), PS(f3), 1}, {PS(g7), PS(g6), 1}, "Fianchetto" }
 };
 
 static char* pieceLabels[]  = { " ", "P", "N", "B", "R", "Q", "K", " ",
@@ -794,12 +793,12 @@ void printBoard(BOARDPTR_T(board)) {
 }
 
 int main() {
+    srand(time(0));
     PACKED_SQUARE from = 0, to = 0;
 	// Choose an opening. These are just the first move for white and for black
 	int opening = rand() % (sizeof(openings) / sizeof(OPENING));
 	printf("Chose the '%s' opening...\n", openings[opening].openingName);
     // Set up the initial board
-    srand(time(0));
     memcpy(&chessBoard, &initial_board, sizeof(chessBoard));
     eraseBoard();
     printf("\n\n"); printBoard(&chessBoard);
