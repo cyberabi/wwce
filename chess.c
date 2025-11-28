@@ -137,6 +137,14 @@ static const PIECE_T pieceValues[] = {
 static PIECE_T chessBoard[8][8];
 
 // NOTE: For FEN strings, and in our internal representation, board row "0" is chess rank 8; array column 0 is chess file a
+static const char* puzzles[] = {
+    "5rk1/pQp1q1pp/2B1p3/4P1p1/P1p2P2/N1P2R1K/P7/R4nr1 b",  // Black to mate in 1; easy
+    "r1bq2r1/b4pk1/p1pp1p2/1p2pP2/1P2P1PB/3P4/1PPQ2P1/R3K2R w", // White to mate in 2; easy
+    "8/1N2N3/2r5/3qp2R/QP2kp1K/5R2/6B1/6B1 w",  // White to mate in 2; difficult
+    "8/q7/8/8/8/1Nr1b3/2B2k2/3K4 b",  // Black to mate in 2; easy
+    "r1b1kb1r/pppp1ppp/5q2/4n3/3KP3/2N3PN/PPP4P/R1BQ1B1R b kq - 0 1",   // Black to mate in 3
+    "r3k2r/ppp2Npp/1b5n/4p2b/2B1P2q/BQP2P2/P5PP/RN5K w kq - 1 0"   // White to mate in 3
+};
 static const char* startingPositon = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 typedef struct { int toMove; int halfMoves; int moveNumber;} FENSTATS;
 
@@ -865,6 +873,9 @@ int main(int argc, char* argv[]) {
     FENSTATS stats;
 
     if (argc > 2 && !strcmp(argv[1], "-fen")) { position = argv[2]; opening = -1; }
+    else if (argc > 2 && !strcmp(argv[1], "-puzzle")) {
+        position = puzzles[ atoi(argv[2]) % (sizeof(puzzles)/sizeof(puzzles[0])) ]; opening = -1;
+    }
     else if (argc > 1 && !strcmp(argv[1], "-startpos")) {/* use default start position and opening */}
     parseFENString(&chessBoard, &stats, position);
     if (opening != -1) printf("Chose the '%s' opening...\n", openings[opening].openingName);
