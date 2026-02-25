@@ -1,7 +1,16 @@
 # wwce
-World's Worst Chess Engine
 
-I challenged myself to write a rudimenatary chess engine in four hours. That initial challenge was a qualified success. The resulting executable is under 1000 lines of code including comments, and under 64K compiled (on a Macbook).
+>__NOTE:__
+>
+>The bugfixes branch (https://github.com/cyberabi/wwce/tree/bugfixes) has incremental improvements to __wwce__ to address the issues called out below. The main branch has the original 4 hour project.
+> 
+> Don't code like this. MIT License. Have fun!
+
+## World's Worst Chess Engine ##
+
+I challenged myself to write a rudimenatary chess engine in four hours. I gave myself this challenge after answering two chess-related questions on Quora. The first was whether an employer should be impressed that a candidate wrote a chess engine. The second was what's the next-worst chess engine after a "random mover."
+
+That initial challenge was a qualified success. The resulting executable is under 1000 lines of code including comments, and under 64K compiled (on a Macbook).
 
 Here's what's missing to make it really Chess:
 1) Pawn promotion
@@ -26,10 +35,6 @@ Known bugs:
 2) Black square display algorithm doesn't properly alternate ranks
 3) Random number generator is not seeded; all runs are the same
 4) On its first move a pawn will jump over an intervening piece to move two squares
-
-I gave myself this challenge after answering two chess-related questions on Quora. The first was whether an employer should be impressed that a candidate wrote a chess engine. The second was what's the next-worst chess engine after a "random mover."
-
-The bugfixes branch (https://github.com/cyberabi/wwce/tree/bugfixes) has incremental improvements to wwce to address the issues called out above. The main branch has the original 4 hour project. Don't code like this. MIT License. Have fun!
 
 Chris Burke
 chris@cyberabi.com
